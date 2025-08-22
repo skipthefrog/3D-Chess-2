@@ -538,14 +538,18 @@ public class CheckDetectionManager : MonoBehaviour
         Debug.Log($"SafeUpdateVisualFeedback: UI initialized: {_uiStateInitialized}");
         
         // Fire events only when state actually changes
+        // FIXED: Handle initial check scenarios more robustly
         if (currentWhiteInCheck && (!_uiStateInitialized || !previousWhiteInCheck))
         {
             Debug.Log("SafeUpdateVisualFeedback: Firing OnKingInCheck for WHITE");
             OnKingInCheck?.Invoke(PieceColor.White);
             _lastWhiteCheckStateToUI = true;
         }
-        else if (!currentWhiteInCheck && _uiStateInitialized && previousWhiteInCheck)
+        else if (!currentWhiteInCheck && (previousWhiteInCheck || (!_uiStateInitialized && _lastWhiteCheckStateToUI)))
         {
+            // FIXED: Fire OnCheckResolved if:
+            // 1. UI was initialized and king was previously in check (normal case)
+            // 2. UI wasn't initialized but we have tracked state showing king was in check (initial check case)
             Debug.Log("SafeUpdateVisualFeedback: Firing OnCheckResolved for WHITE");
             OnCheckResolved?.Invoke(PieceColor.White);
             _lastWhiteCheckStateToUI = false;
@@ -561,8 +565,11 @@ public class CheckDetectionManager : MonoBehaviour
             OnKingInCheck?.Invoke(PieceColor.Black);
             _lastBlackCheckStateToUI = true;
         }
-        else if (!currentBlackInCheck && _uiStateInitialized && previousBlackInCheck)
+        else if (!currentBlackInCheck && (previousBlackInCheck || (!_uiStateInitialized && _lastBlackCheckStateToUI)))
         {
+            // FIXED: Fire OnCheckResolved if:
+            // 1. UI was initialized and king was previously in check (normal case)  
+            // 2. UI wasn't initialized but we have tracked state showing king was in check (initial check case)
             Debug.Log("SafeUpdateVisualFeedback: Firing OnCheckResolved for BLACK");
             OnCheckResolved?.Invoke(PieceColor.Black);
             _lastBlackCheckStateToUI = false;
@@ -675,6 +682,7 @@ public class CheckDetectionManager : MonoBehaviour
     /// <summary>
     /// Force visual indicator refresh when state tracking fails
     /// This is a failsafe method to ensure visual indicators match actual game state
+    /// ENHANCED: Now fires proper events to ensure all UI components receive state changes
     /// </summary>
     public void ForceVisualStateRefresh()
     {
@@ -695,6 +703,10 @@ public class CheckDetectionManager : MonoBehaviour
         
         Debug.Log($"🔧 CheckDetectionManager.ForceVisualStateRefresh: Actual states - White: {actualWhiteInCheck}, Black: {actualBlackInCheck}");
         Debug.Log($"🔧 CheckDetectionManager.ForceVisualStateRefresh: Tracked UI states - White: {_lastWhiteCheckStateToUI}, Black: {_lastBlackCheckStateToUI}");
+        
+        // Store previous states before updating
+        bool previousWhiteState = _lastWhiteCheckStateToUI;
+        bool previousBlackState = _lastBlackCheckStateToUI;
         
         // Force visual feedback to match actual state
         if (CheckVisualFeedbackManager.Instance != null)
@@ -739,6 +751,29 @@ public class CheckDetectionManager : MonoBehaviour
                     CheckStatusUI.Instance.HideCheckMessage();
                 }
             }
+        }
+        
+        // ENHANCED: Fire proper events to ensure all event subscribers get state changes
+        if (actualWhiteInCheck && !previousWhiteState)
+        {
+            Debug.Log("🔧 CheckDetectionManager.ForceVisualStateRefresh: Firing OnKingInCheck for WHITE");
+            OnKingInCheck?.Invoke(PieceColor.White);
+        }
+        else if (!actualWhiteInCheck && previousWhiteState)
+        {
+            Debug.Log("🔧 CheckDetectionManager.ForceVisualStateRefresh: Firing OnCheckResolved for WHITE");
+            OnCheckResolved?.Invoke(PieceColor.White);
+        }
+        
+        if (actualBlackInCheck && !previousBlackState)
+        {
+            Debug.Log("🔧 CheckDetectionManager.ForceVisualStateRefresh: Firing OnKingInCheck for BLACK");
+            OnKingInCheck?.Invoke(PieceColor.Black);
+        }
+        else if (!actualBlackInCheck && previousBlackState)
+        {
+            Debug.Log("🔧 CheckDetectionManager.ForceVisualStateRefresh: Firing OnCheckResolved for BLACK");
+            OnCheckResolved?.Invoke(PieceColor.Black);
         }
         
         // Update tracked UI states to match actual state
