@@ -3,10 +3,10 @@ using UnityEngine.UI;
 using System.Collections;
 
 /// <summary>
-/// Persistent UI component that always displays the current check status for both players
-/// Shows "White: Safe | Black: CHECK!" style messages that never disappear
-/// Uses event-driven updates for instant response to check conditions (no polling)
-/// Only updates when check status actually changes via CheckDetectionManager events
+/// Enhanced status bar UI component that displays comprehensive game status
+/// Shows check status, current turn, and game phase in a persistent top bar
+/// Features: Turn indicators, check status icons, responsive design for mobile
+/// Uses event-driven updates for instant response to all game state changes
 /// </summary>
 public class PersistentCheckStatusUI : MonoBehaviour
 {
@@ -15,10 +15,17 @@ public class PersistentCheckStatusUI : MonoBehaviour
     public bool enableEventDrivenUpdates = true; // Use events instead of polling
     
     [Header("Visual Settings")]
-    public int fontSize = 20;
+    public int fontSize = 18;
     public Color safeColor = Color.green;
     public Color checkColor = Color.red;
-    public Color backgroundColor = new Color(0f, 0f, 0f, 0.7f);
+    public Color currentTurnColor = new Color(0.3f, 0.6f, 1f, 1f); // Blue for current turn
+    public Color backgroundColor = new Color(0f, 0f, 0f, 0.8f);
+    
+    [Header("Status Icons")]
+    public string safeIcon = "✓";
+    public string checkIcon = "⚠️";
+    public string checkmateIcon = "💀";
+    public string turnIcon = "▶";
     
     // UI Components
     private Canvas statusCanvas;
@@ -31,6 +38,10 @@ public class PersistentCheckStatusUI : MonoBehaviour
     private bool blackInCheck = false;
     private bool lastWhiteStatus = false;
     private bool lastBlackStatus = false;
+    
+    // Turn tracking
+    private PieceColor currentTurn = PieceColor.White;
+    private GameState currentGameState = GameState.PlacementPhase;
     
     // Game end tracking
     private bool gameEnded = false;
@@ -92,6 +103,18 @@ public class PersistentCheckStatusUI : MonoBehaviour
             GameEndDetectionManager.Instance.OnCheckmate -= OnCheckmateEvent;
             GameEndDetectionManager.Instance.OnStalemate -= OnStalemateEvent;
         }
+        
+        // Clean up turn manager event subscriptions
+        if (TurnManager.Instance != null)
+        {
+            TurnManager.Instance.OnTurnChanged -= OnTurnChangedEvent;
+        }
+        
+        // Clean up game state manager event subscriptions
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.OnStateChanged -= OnGameStateChangedEvent;
+        }
     }
     
     /// <summary>
@@ -126,18 +149,18 @@ public class PersistentCheckStatusUI : MonoBehaviour
         
         RectTransform panelRect = statusPanel.GetComponent<RectTransform>();
         
-        // Position at top-center of screen (where BoardRotationUI was)
-        panelRect.anchorMin = new Vector2(0.5f, 1f);
-        panelRect.anchorMax = new Vector2(0.5f, 1f);
-        panelRect.anchoredPosition = new Vector2(0, -40f); // 40 pixels from top
-        panelRect.sizeDelta = new Vector2(320f, 60f); // Wide enough for status text
+        // Position at top-center of screen as full-width status bar
+        panelRect.anchorMin = new Vector2(0f, 1f);
+        panelRect.anchorMax = new Vector2(1f, 1f);
+        panelRect.anchoredPosition = new Vector2(0, -35f); // 35 pixels from top
+        panelRect.sizeDelta = new Vector2(0f, 70f); // Full width, taller for better visibility
         
         // Create status text
         GameObject textObject = new GameObject("StatusText");
         textObject.transform.SetParent(statusPanel.transform);
         
         statusText = textObject.AddComponent<Text>();
-        statusText.text = "White: Safe | Black: Safe";
+        statusText.text = "✓ White: Safe | Turn: White ▶ | Black: Safe ✓";
         statusText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         statusText.fontSize = fontSize;
         statusText.fontStyle = FontStyle.Bold;
@@ -207,6 +230,22 @@ public class PersistentCheckStatusUI : MonoBehaviour
                         GameEndDetectionManager.Instance.OnCheckmate += OnCheckmateEvent;
                         GameEndDetectionManager.Instance.OnStalemate += OnStalemateEvent;
                         Debug.Log("PersistentCheckStatusUI: Successfully subscribed to game end events");
+                    }
+                    
+                    // Subscribe to turn manager events for current player tracking
+                    if (TurnManager.Instance != null)
+                    {
+                        TurnManager.Instance.OnTurnChanged += OnTurnChangedEvent;
+                        currentTurn = TurnManager.Instance.GetCurrentPlayer();
+                        Debug.Log($"PersistentCheckStatusUI: Successfully subscribed to turn events, current turn: {currentTurn}");
+                    }
+                    
+                    // Subscribe to game state manager events for phase tracking
+                    if (GameStateManager.Instance != null)
+                    {
+                        GameStateManager.Instance.OnStateChanged += OnGameStateChangedEvent;
+                        currentGameState = GameStateManager.Instance.currentState;
+                        Debug.Log($"PersistentCheckStatusUI: Successfully subscribed to game state events, current state: {currentGameState}");
                     }
                     
                     // Validate subscription
@@ -355,6 +394,36 @@ public class PersistentCheckStatusUI : MonoBehaviour
     }
     
     /// <summary>
+    /// Event handler for turn changes
+    /// </summary>
+    private void OnTurnChangedEvent(PieceColor newCurrentPlayer)
+    {
+        Debug.Log($"🔄 PersistentCheckStatusUI.OnTurnChangedEvent: Turn changed to {newCurrentPlayer}");
+        
+        currentTurn = newCurrentPlayer;
+        UpdateStatusDisplay();
+    }
+    
+    /// <summary>
+    /// Event handler for game state changes
+    /// </summary>
+    private void OnGameStateChangedEvent(GameState newState)
+    {
+        Debug.Log($"🎮 PersistentCheckStatusUI.OnGameStateChangedEvent: Game state changed to {newState}");
+        
+        currentGameState = newState;
+        
+        // Reset game end status when transitioning to new game
+        if (newState == GameState.PlacementPhase || newState == GameState.Playing)
+        {
+            gameEnded = false;
+            gameEndMessage = "";
+        }
+        
+        UpdateStatusDisplay();
+    }
+    
+    /// <summary>
     /// Stop status monitoring
     /// </summary>
     private void StopStatusMonitoring()
@@ -417,7 +486,7 @@ public class PersistentCheckStatusUI : MonoBehaviour
     }
     
     /// <summary>
-    /// Update the status display with current check states
+    /// Update the enhanced status display with check states, turn indicator, and game phase
     /// </summary>
     private void UpdateStatusDisplay()
     {
@@ -446,30 +515,53 @@ public class PersistentCheckStatusUI : MonoBehaviour
         }
         else
         {
-            // Normal game status
+            // Enhanced status bar format with icons and turn indicator
+            string whiteIcon = whiteInCheck ? checkIcon : safeIcon;
+            string blackIcon = blackInCheck ? checkIcon : safeIcon;
             string whiteStatus = whiteInCheck ? "CHECK!" : "Safe";
             string blackStatus = blackInCheck ? "CHECK!" : "Safe";
             
-            statusMessage = $"White: {whiteStatus} | Black: {blackStatus}";
+            // Add turn indicator highlighting
+            string turnIndicator = "";
+            if (currentGameState == GameState.Playing)
+            {
+                turnIndicator = $"Turn: {currentTurn} {turnIcon}";
+            }
+            else if (currentGameState == GameState.PlacementPhase)
+            {
+                turnIndicator = "Placement Phase";
+            }
+            else
+            {
+                turnIndicator = $"State: {currentGameState}";
+            }
+            
+            // Build enhanced status message
+            statusMessage = $"{whiteIcon} White: {whiteStatus} | {turnIndicator} | Black: {blackStatus} {blackIcon}";
             statusText.text = statusMessage;
             
-            // Update background color based on check status
+            // Update background color based on game state and check status
             if (whiteInCheck || blackInCheck)
             {
                 // Red background if anyone is in check
-                backgroundImage.color = new Color(0.8f, 0.2f, 0.2f, 0.8f);
+                backgroundImage.color = new Color(0.8f, 0.2f, 0.2f, 0.85f);
                 
                 // Add pulsing effect for check status
                 StartCoroutine(PulseEffect());
             }
+            else if (currentGameState == GameState.PlacementPhase)
+            {
+                // Blue-tinted background for placement phase
+                backgroundImage.color = new Color(0.2f, 0.3f, 0.6f, 0.8f);
+            }
             else
             {
-                // Dark background if both players are safe
+                // Default dark background for normal gameplay
                 backgroundImage.color = backgroundColor;
             }
         }
         
-        Debug.Log($"PersistentCheckStatusUI: Display updated - {statusMessage}");
+        Debug.Log($"PersistentCheckStatusUI: Enhanced display updated - {statusMessage}");
     }
     
     /// <summary>
@@ -516,6 +608,17 @@ public class PersistentCheckStatusUI : MonoBehaviour
         
         whiteInCheck = whiteCheck;
         blackInCheck = blackCheck;
+        UpdateStatusDisplay();
+    }
+    
+    /// <summary>
+    /// Manually set turn status (for testing or external control)
+    /// </summary>
+    public void SetCurrentTurn(PieceColor turn)
+    {
+        Debug.Log($"PersistentCheckStatusUI.SetCurrentTurn: {turn}");
+        
+        currentTurn = turn;
         UpdateStatusDisplay();
     }
     
@@ -597,22 +700,39 @@ public class PersistentCheckStatusUI : MonoBehaviour
     
     private System.Collections.IEnumerator TestSequence()
     {
-        Debug.Log("PersistentCheckStatusUI: Starting test sequence");
+        Debug.Log("PersistentCheckStatusUI: Starting enhanced status bar test sequence");
+        
+        // Test normal gameplay with turn changes
+        currentGameState = GameState.Playing;
         
         SetCheckStatus(false, false);
+        SetCurrentTurn(PieceColor.White);
         yield return new WaitForSeconds(2f);
         
-        SetCheckStatus(true, false);
+        SetCheckStatus(true, false);  // White in check
         yield return new WaitForSeconds(2f);
         
-        SetCheckStatus(true, true);
+        SetCurrentTurn(PieceColor.Black);  // Turn change
         yield return new WaitForSeconds(2f);
         
-        SetCheckStatus(false, true);
+        SetCheckStatus(false, true);  // Black in check
         yield return new WaitForSeconds(2f);
         
-        SetCheckStatus(false, false);
+        SetCheckStatus(true, true);   // Both in check
+        yield return new WaitForSeconds(2f);
         
-        Debug.Log("PersistentCheckStatusUI: Test sequence complete");
+        SetCheckStatus(false, false); // Both safe
+        yield return new WaitForSeconds(2f);
+        
+        // Test placement phase
+        currentGameState = GameState.PlacementPhase;
+        UpdateStatusDisplay();
+        yield return new WaitForSeconds(2f);
+        
+        // Back to normal
+        currentGameState = GameState.Playing;
+        UpdateStatusDisplay();
+        
+        Debug.Log("PersistentCheckStatusUI: Enhanced test sequence complete");
     }
 }
