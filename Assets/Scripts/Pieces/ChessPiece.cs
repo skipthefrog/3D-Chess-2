@@ -1,0 +1,563 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+public enum PieceColor
+{
+    White,
+    Black
+}
+
+public enum PlayerType
+{
+    Human,
+    Computer
+}
+
+public enum ChessPieceType
+{
+    Pawn,
+    Rook,
+    Knight,
+    Bishop,
+    Queen,
+    King
+}
+
+public abstract class ChessPiece : MonoBehaviour
+{
+    [Header("Piece Properties")]
+    public PieceColor pieceColor;
+    public ChessPieceType pieceType;
+    
+    [Header("Visual Settings")]
+    public Material whiteMaterial;
+    public Material blackMaterial;
+    public float moveSpeed = 5f;
+    
+    protected BoardPosition currentPosition = new BoardPosition(-1, -1, -1); // Invalid position by default
+    protected bool hasMoved = false;
+    protected MeshRenderer meshRenderer;
+    protected bool isMoving = false;
+    
+    public BoardPosition CurrentPosition => currentPosition;
+    public bool HasMoved => hasMoved;
+    public bool IsMoving => isMoving;
+    
+    protected virtual void Awake()
+    {
+        meshRenderer = GetComponent<MeshRenderer>();
+        if (meshRenderer == null)
+        {
+            meshRenderer = GetComponentInChildren<MeshRenderer>();
+        }
+        
+        ApplyMaterial();
+    }
+    
+    protected virtual void Start()
+    {
+        // All pieces should only be registered through explicit Initialize() calls
+        if (!currentPosition.IsValid())
+        {
+            Debug.LogWarning($"ChessPiece: Uninitialized {pieceColor} {pieceType} detected");
+        }
+    }
+    
+    public virtual void Initialize(BoardPosition position, PieceColor color)
+    {
+        // ANTI-CORRUPTION: Allow re-initialization for pawn spawning but prevent other duplicate initialization
+        if (currentPosition.IsValid())
+        {
+            Debug.LogWarning($"ChessPiece.Initialize: {color} {pieceType} already initialized at {currentPosition}, ignoring re-initialization to {position}");
+            return;
+        }
+        
+        Debug.Log($"ChessPiece.Initialize: Initializing {color} {pieceType} at {position}");
+        
+        currentPosition = position;
+        pieceColor = color;
+        hasMoved = false;
+        ApplyMaterial();
+        
+        if (ChessBoard.Instance != null)
+        {
+            Vector3 localPos = ChessBoard.Instance.BoardToLocalPosition(position);
+            transform.localPosition = localPos;
+            
+            bool registrationResult = ChessBoard.Instance.SetPieceAt(position, this);
+            if (!registrationResult)
+            {
+                Debug.LogError($"ChessPiece.Initialize: Failed to register {color} {pieceType} at {position}");
+                // Clear the position if registration failed to prevent desync
+                currentPosition = new BoardPosition(-1, -1, -1);
+            }
+            else
+            {
+                Debug.Log($"ChessPiece.Initialize: Successfully registered {color} {pieceType} at {position}");
+            }
+        }
+        else
+        {
+            Debug.LogError($"ChessPiece.Initialize: ChessBoard.Instance is NULL!");
+            // Clear the position if board is not available
+            currentPosition = new BoardPosition(-1, -1, -1);
+        }
+    }
+    
+    public virtual void ApplyMaterial()
+    {
+        if (meshRenderer != null)
+        {
+            Material targetMaterial = pieceColor == PieceColor.White ? whiteMaterial : blackMaterial;
+            if (targetMaterial == null)
+            {
+                targetMaterial = CreateDefaultMaterial();
+            }
+            meshRenderer.material = targetMaterial;
+        }
+    }
+    
+    protected Material CreateDefaultMaterial()
+    {
+        Material material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        
+        if (pieceColor == PieceColor.White)
+        {
+            // Bright white with slight off-white tint for better visibility
+            material.color = new Color(0.95f, 0.95f, 0.95f, 1f);
+            material.SetFloat("_Metallic", 0.1f);      // Slight metallic look
+            material.SetFloat("_Smoothness", 0.6f);    // Semi-glossy finish
+        }
+        else
+        {
+            // Dark gray instead of pure black for much better visibility
+            material.color = new Color(0.25f, 0.25f, 0.25f, 1f); // Dark gray instead of pure black
+            material.SetFloat("_Metallic", 0.2f);      // Slightly more metallic for distinction
+            material.SetFloat("_Smoothness", 0.4f);    // Less glossy than white for contrast
+        }
+        
+        return material;
+    }
+    
+    public abstract List<BoardPosition> GetValidMoves();
+    
+    /// <summary>
+    /// Get squares that this piece can attack. For most pieces, this is the same as GetValidMoves(),
+    /// but some pieces (like pawns) have different attack patterns vs movement patterns.
+    /// This method is used by the check detection system.
+    /// </summary>
+    /// <returns>List of squares this piece can attack</returns>
+    public virtual List<BoardPosition> GetAttackSquares()
+    {
+        // Default implementation: attack squares = valid moves
+        // Override in specific piece classes if attack pattern differs from movement
+        return GetValidMoves();
+    }
+    
+    /// <summary>
+    /// Get valid moves that don't leave the king in check. This is the main method
+    /// that should be called for legal move validation during gameplay.
+    /// </summary>
+    /// <returns>List of legal moves that don't leave king in check</returns>
+    public List<BoardPosition> GetLegalMoves()
+    {
+        List<BoardPosition> validMoves = GetValidMoves();
+        
+        // During gameplay, filter out moves that would leave king in check
+        if (CheckDetectionManager.Instance != null && 
+            GameStateManager.Instance != null && 
+            GameStateManager.Instance.CanMovePieces())
+        {
+            List<BoardPosition> legalMoves = new List<BoardPosition>();
+            
+            foreach (BoardPosition move in validMoves)
+            {
+                // Check if move would leave king in check
+                bool wouldLeaveInCheck = CheckDetectionManager.Instance.WouldMoveLeaveKingInCheck(this, currentPosition, move);
+                
+                if (wouldLeaveInCheck)
+                {
+                    continue; // Skip this move
+                }
+                
+                // Opening move protection: prevent king captures on first turn
+                if (TurnManager.Instance != null && TurnManager.Instance.ShouldBlockKingCapture())
+                {
+                    ChessPiece targetPiece = ChessBoard.Instance?.GetPieceAt(move);
+                    if (targetPiece != null && targetPiece.pieceType == ChessPieceType.King)
+                    {
+                        continue; // Skip king captures on first turn
+                    }
+                }
+                
+                legalMoves.Add(move);
+            }
+            
+            return legalMoves;
+        }
+        
+        // During placement phase or when check detection is disabled, return all valid moves
+        return validMoves;
+    }
+    
+    protected virtual bool IsValidMove(BoardPosition targetPosition)
+    {
+        if (!targetPosition.IsValid()) return false;
+        if (targetPosition == currentPosition) return false;
+        
+        ChessPiece targetPiece = ChessBoard.Instance?.GetPieceAt(targetPosition);
+        if (targetPiece != null && targetPiece.pieceColor == pieceColor) return false;
+        
+        return true;
+    }
+    
+    protected List<BoardPosition> GetValidMovesInDirection(Vector3Int direction, int maxDistance = 4)
+    {
+        List<BoardPosition> validMoves = new List<BoardPosition>();
+        
+        for (int distance = 1; distance <= maxDistance; distance++)
+        {
+            BoardPosition newPosition = new BoardPosition(
+                currentPosition.x + direction.x * distance,
+                currentPosition.y + direction.y * distance,
+                currentPosition.z + direction.z * distance
+            );
+            
+            if (!newPosition.IsValid()) break;
+            
+            ChessPiece pieceAtPosition = ChessBoard.Instance?.GetPieceAt(newPosition);
+            
+            if (pieceAtPosition == null)
+            {
+                validMoves.Add(newPosition);
+            }
+            else
+            {
+                if (pieceAtPosition.pieceColor != pieceColor)
+                {
+                    validMoves.Add(newPosition);
+                }
+                break;
+            }
+        }
+        
+        return validMoves;
+    }
+    
+    public virtual bool CanMoveTo(BoardPosition targetPosition)
+    {
+        List<BoardPosition> legalMoves = GetLegalMoves();
+        return legalMoves.Contains(targetPosition);
+    }
+    
+    public virtual bool MoveTo(BoardPosition newPosition)
+    {
+        if (isMoving)
+        {
+            return false;
+        }
+        
+        // CRITICAL FIX: Ensure position sync with board array
+        Debug.Log($"🔧 ChessPiece.MoveTo: {pieceColor} {pieceType} moving from {currentPosition} to {newPosition}");
+        currentPosition = newPosition;
+        hasMoved = true;
+        
+        // Validate that board array is consistent with this move
+        if (ChessBoard.Instance != null)
+        {
+            ChessPiece boardPiece = ChessBoard.Instance.GetPieceAt(newPosition);
+            if (boardPiece != this)
+            {
+                Debug.LogWarning($"⚠️ ChessPiece.MoveTo: Position sync warning - board[{newPosition}] doesn't contain this piece");
+            }
+        }
+        
+        StartCoroutine(MoveCoroutine(newPosition));
+        return true;
+    }
+    
+    protected System.Collections.IEnumerator MoveCoroutine(BoardPosition targetPosition)
+    {
+        isMoving = true;
+        Vector3 startPos = transform.localPosition;
+        Vector3 endPos = ChessBoard.Instance.BoardToLocalPosition(targetPosition);
+        
+        float elapsedTime = 0f;
+        float duration = 1f / moveSpeed;
+        
+        if (Vector3.Distance(startPos, endPos) < 0.01f)
+        {
+            Debug.LogWarning($"Piece movement: Start and end positions are nearly identical");
+        }
+        
+        while (elapsedTime < duration)
+        {
+            elapsedTime += Time.deltaTime;
+            float t = elapsedTime / duration;
+            
+            Vector3 currentPos = Vector3.Lerp(startPos, endPos, t);
+            transform.localPosition = currentPos;
+            
+            yield return null;
+        }
+        
+        transform.localPosition = endPos;
+        isMoving = false;
+        
+        OnMoveComplete();
+    }
+    
+    protected virtual void OnMoveComplete()
+    {
+        // Start delayed UI update to ensure visual feedback updates after move completes
+        if (CheckDetectionManager.Instance != null && 
+            GameStateManager.Instance != null && 
+            GameStateManager.Instance.CanMovePieces())
+        {
+            StartCoroutine(DelayedUIUpdate());
+        }
+        
+        // Override in derived classes for piece-specific move completion logic
+    }
+    
+    /// <summary>
+    /// Coroutine to update visual feedback after move completion with a small delay
+    /// This ensures the move is fully complete before updating UI
+    /// </summary>
+    private System.Collections.IEnumerator DelayedUIUpdate()
+    {
+        // Small delay to ensure move is completely processed
+        yield return new UnityEngine.WaitForSeconds(0.1f);
+        
+        // Safely update visual feedback without interfering with move validation
+        if (CheckDetectionManager.Instance != null)
+        {
+            CheckDetectionManager.Instance.SafeUpdateVisualFeedback();
+        }
+    }
+    
+    public virtual void OnSelected()
+    {
+        // Add selection glow to the piece itself
+        // Note: Move indicators are handled by InputManager
+        AddSelectionGlow();
+    }
+    
+    public virtual void OnDeselected()
+    {
+        // Remove selection glow from the piece
+        // Note: Move indicators are cleared by InputManager
+        RemoveSelectionGlow();
+    }
+    
+    protected virtual void OnMouseDown()
+    {
+        InputManager inputManager = FindFirstObjectByType<InputManager>();
+        if (inputManager != null)
+        {
+            inputManager.OnPieceClicked(this);
+        }
+    }
+    
+    private GameObject selectionGlow;
+    private GameObject checkIndicator;
+    
+    protected virtual void AddSelectionGlow()
+    {
+        if (selectionGlow != null) return; // Already has glow
+        
+        // Create a slightly larger sphere around the piece
+        selectionGlow = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        selectionGlow.name = "SelectionGlow";
+        selectionGlow.transform.SetParent(transform);
+        selectionGlow.transform.localPosition = new Vector3(0, 1.05f, 0); // Same as piece center
+        selectionGlow.transform.localScale = new Vector3(2.0f, 2.0f, 2.0f); // Moderately larger than piece
+        
+        // Remove collider so it doesn't interfere with input
+        Collider glowCollider = selectionGlow.GetComponent<Collider>();
+        if (glowCollider != null)
+        {
+            DestroyImmediate(glowCollider);
+        }
+        
+        // Create glowing material
+        Renderer glowRenderer = selectionGlow.GetComponent<Renderer>();
+        Material glowMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        glowMaterial.color = new Color(1f, 1f, 0f, 0.2f); // More transparent yellow
+        glowMaterial.SetFloat("_Surface", 1); // Transparent
+        glowMaterial.SetFloat("_Blend", 0); // Alpha blend
+        glowMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        glowMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        glowMaterial.SetInt("_ZWrite", 0);
+        glowMaterial.renderQueue = 3000;
+        
+        glowRenderer.material = glowMaterial;
+        
+    }
+    
+    protected virtual void RemoveSelectionGlow()
+    {
+        if (selectionGlow != null)
+        {
+            DestroyImmediate(selectionGlow);
+            selectionGlow = null;
+        }
+    }
+    
+    /// <summary>
+    /// Add a red check indicator to show this king is in check
+    /// </summary>
+    public virtual void ShowCheckIndicator()
+    {
+        if (pieceType != ChessPieceType.King) return; // Only kings show check indicators
+        if (checkIndicator != null) return; // Already has indicator
+        
+        // Create a red pulsing sphere around the king
+        checkIndicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        checkIndicator.name = "CheckIndicator";
+        checkIndicator.transform.SetParent(transform);
+        checkIndicator.transform.localPosition = new Vector3(0, 1.05f, 0); // Same as piece center
+        checkIndicator.transform.localScale = new Vector3(2.5f, 2.5f, 2.5f); // Larger than selection glow
+        
+        // Remove collider so it doesn't interfere with input
+        Collider checkCollider = checkIndicator.GetComponent<Collider>();
+        if (checkCollider != null)
+        {
+            DestroyImmediate(checkCollider);
+        }
+        
+        // Create pulsing red material
+        Renderer checkRenderer = checkIndicator.GetComponent<Renderer>();
+        Material checkMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        checkMaterial.color = new Color(1f, 0f, 0f, 0.3f); // Semi-transparent red
+        checkMaterial.SetFloat("_Surface", 1); // Transparent
+        checkMaterial.SetFloat("_Blend", 0); // Alpha blend
+        checkMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        checkMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        checkMaterial.SetInt("_ZWrite", 0);
+        checkMaterial.renderQueue = 3001; // Render after selection glow
+        
+        checkRenderer.material = checkMaterial;
+        
+        // Add pulsing animation
+        CheckIndicatorPulse pulseScript = checkIndicator.AddComponent<CheckIndicatorPulse>();
+        
+        Debug.Log($"ChessPiece: Added check indicator to {pieceColor} king");
+    }
+    
+    /// <summary>
+    /// Remove the check indicator
+    /// </summary>
+    public virtual void HideCheckIndicator()
+    {
+        if (checkIndicator != null)
+        {
+            DestroyImmediate(checkIndicator);
+            checkIndicator = null;
+            Debug.Log($"ChessPiece: Removed check indicator from {pieceColor} king");
+        }
+    }
+    
+    /// <summary>
+    /// Reset piece position to invalid state for returning to tray
+    /// </summary>
+    public virtual void ResetPosition()
+    {
+        currentPosition = new BoardPosition(-1, -1, -1); // Invalid position
+        hasMoved = false;
+    }
+    
+    /// <summary>
+    /// Set the current position of the piece (for synchronization purposes)
+    /// </summary>
+    public virtual void SetCurrentPosition(BoardPosition position)
+    {
+        currentPosition = position;
+    }
+    
+    /// <summary>
+    /// Validate that this piece's position is synchronized with the board array
+    /// </summary>
+    public bool ValidatePosition()
+    {
+        if (ChessBoard.Instance == null)
+        {
+            Debug.LogWarning($"ChessPiece.ValidatePosition: ChessBoard.Instance is null for {pieceColor} {pieceType}");
+            return false;
+        }
+        
+        // Check if position is invalid
+        if (!currentPosition.IsValid())
+        {
+            Debug.LogError($"🚨 POSITION VALIDATION FAILED: {pieceColor} {pieceType} has invalid position {currentPosition}");
+            return false;
+        }
+        
+        // Check if board array matches piece position
+        ChessPiece boardPiece = ChessBoard.Instance.GetPieceAt(currentPosition);
+        if (boardPiece != this)
+        {
+            Debug.LogError($"🚨 POSITION SYNC MISMATCH: {pieceColor} {pieceType} thinks it's at {currentPosition}, but board has {(boardPiece != null ? $"{boardPiece.pieceColor} {boardPiece.pieceType}" : "NULL")}");
+            return false;
+        }
+        
+        Debug.Log($"✅ POSITION VALIDATED: {pieceColor} {pieceType} correctly positioned at {currentPosition}");
+        return true;
+    }
+    
+    /// <summary>
+    /// Attempt to repair position synchronization issues
+    /// </summary>
+    public bool RepairPosition()
+    {
+        if (ChessBoard.Instance == null)
+        {
+            Debug.LogError($"ChessPiece.RepairPosition: ChessBoard.Instance is null for {pieceColor} {pieceType}");
+            return false;
+        }
+        
+        Debug.Log($"🔧 ATTEMPTING POSITION REPAIR for {pieceColor} {pieceType} at {currentPosition}");
+        
+        // If position is invalid, try to find where this piece is in the board array
+        if (!currentPosition.IsValid())
+        {
+            Debug.Log($"🔍 Searching board array for misplaced {pieceColor} {pieceType}...");
+            
+            // Search entire board for this piece
+            for (int x = 0; x < 4; x++)
+            {
+                for (int y = 0; y < 4; y++)
+                {
+                    for (int z = 0; z < 4; z++)
+                    {
+                        BoardPosition searchPos = new BoardPosition(x, y, z);
+                        ChessPiece foundPiece = ChessBoard.Instance.GetPieceAt(searchPos);
+                        
+                        if (foundPiece == this)
+                        {
+                            Debug.Log($"🎯 FOUND: {pieceColor} {pieceType} located at {searchPos} in board array");
+                            currentPosition = searchPos;
+                            Debug.Log($"✅ REPAIR COMPLETE: Updated position to {currentPosition}");
+                            return true;
+                        }
+                    }
+                }
+            }
+            
+            Debug.LogError($"❌ REPAIR FAILED: {pieceColor} {pieceType} not found in board array");
+            return false;
+        }
+        
+        // Position is valid, check if board array is correct
+        ChessPiece boardPiece = ChessBoard.Instance.GetPieceAt(currentPosition);
+        if (boardPiece != this)
+        {
+            Debug.Log($"🔧 BOARD SYNC: Updating board array at {currentPosition} to contain this piece");
+            ChessBoard.Instance.SetPieceAt(currentPosition, this);
+            return true;
+        }
+        
+        Debug.Log($"✅ NO REPAIR NEEDED: {pieceColor} {pieceType} position is already correct");
+        return true;
+    }
+}

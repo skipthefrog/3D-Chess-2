@@ -1,0 +1,4 @@
+repository "3D Chess 2/3D Chess 2@1375839786110@cloud"
+  path "/"
+    br "/main"
+    co "/main"
