@@ -41,7 +41,7 @@ public class PersistentCheckStatusUI : MonoBehaviour
     
     // Turn tracking
     private PieceColor currentTurn = PieceColor.White;
-    private GameState currentGameState = GameState.PlacementPhase;
+    private GameState currentGameState = GameState.PiecePlacement;
     
     // Game end tracking
     private bool gameEnded = false;
@@ -414,7 +414,7 @@ public class PersistentCheckStatusUI : MonoBehaviour
         currentGameState = newState;
         
         // Reset game end status when transitioning to new game
-        if (newState == GameState.PlacementPhase || newState == GameState.Playing)
+        if (newState == GameState.PiecePlacement || newState == GameState.Playing)
         {
             gameEnded = false;
             gameEndMessage = "";
@@ -527,7 +527,7 @@ public class PersistentCheckStatusUI : MonoBehaviour
             {
                 turnIndicator = $"Turn: {currentTurn} {turnIcon}";
             }
-            else if (currentGameState == GameState.PlacementPhase)
+            else if (currentGameState == GameState.PiecePlacement)
             {
                 turnIndicator = "Placement Phase";
             }
@@ -549,7 +549,7 @@ public class PersistentCheckStatusUI : MonoBehaviour
                 // Add pulsing effect for check status
                 StartCoroutine(PulseEffect());
             }
-            else if (currentGameState == GameState.PlacementPhase)
+            else if (currentGameState == GameState.PiecePlacement)
             {
                 // Blue-tinted background for placement phase
                 backgroundImage.color = new Color(0.2f, 0.3f, 0.6f, 0.8f);
@@ -725,7 +725,7 @@ public class PersistentCheckStatusUI : MonoBehaviour
         yield return new WaitForSeconds(2f);
         
         // Test placement phase
-        currentGameState = GameState.PlacementPhase;
+        currentGameState = GameState.PiecePlacement;
         UpdateStatusDisplay();
         yield return new WaitForSeconds(2f);
         
