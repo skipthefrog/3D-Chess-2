@@ -39,6 +39,82 @@ public class InputManager : MonoBehaviour
         Debug.Log("✅ InputManager.Awake: Initialization complete, Update should begin next frame");
     }
     
+    private void Start()
+    {
+        // Subscribe to turn change events to automatically deselect pieces when turn changes
+        if (TurnManager.Instance != null)
+        {
+            TurnManager.Instance.OnTurnChanged += OnTurnChanged;
+            Debug.Log("InputManager: Subscribed to TurnManager.OnTurnChanged");
+        }
+        else
+        {
+            Debug.LogWarning("InputManager: TurnManager.Instance not found - cannot subscribe to turn changes");
+        }
+        
+        // Subscribe to game state changes to clear selection when transitioning states
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.OnStateChanged += OnGameStateChanged;
+            Debug.Log("InputManager: Subscribed to GameStateManager.OnStateChanged");
+        }
+        else
+        {
+            Debug.LogWarning("InputManager: GameStateManager.Instance not found - cannot subscribe to state changes");
+        }
+    }
+    
+    private void OnDestroy()
+    {
+        // Unsubscribe from events to prevent memory leaks
+        if (TurnManager.Instance != null)
+        {
+            TurnManager.Instance.OnTurnChanged -= OnTurnChanged;
+        }
+        
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.OnStateChanged -= OnGameStateChanged;
+        }
+    }
+    
+    /// <summary>
+    /// Handle turn change events - automatically deselect pieces from previous turn
+    /// </summary>
+    private void OnTurnChanged(PieceColor newCurrentPlayer)
+    {
+        Debug.Log($"InputManager.OnTurnChanged: Turn changed to {newCurrentPlayer}");
+        
+        // If we have a piece selected and it's not the current player's turn, deselect it
+        if (selectedPiece != null && selectedPiece.pieceColor != newCurrentPlayer)
+        {
+            Debug.Log($"InputManager.OnTurnChanged: Auto-deselecting {selectedPiece.pieceColor} {selectedPiece.pieceType} - not their turn");
+            DeselectPiece();
+        }
+    }
+    
+    /// <summary>
+    /// Handle game state changes - clear selection when transitioning between states
+    /// </summary>
+    private void OnGameStateChanged(GameState newState)
+    {
+        Debug.Log($"InputManager.OnGameStateChanged: Game state changed to {newState}");
+        
+        // Clear any selected piece when transitioning to Playing state to ensure clean start
+        if (newState == GameState.Playing && selectedPiece != null)
+        {
+            Debug.Log($"InputManager.OnGameStateChanged: Clearing selection on transition to Playing state");
+            DeselectPiece();
+        }
+        
+        // Also clear selection when leaving Playing state
+        if (newState != GameState.Playing && selectedPiece != null)
+        {
+            Debug.Log($"InputManager.OnGameStateChanged: Clearing selection on transition from Playing state");
+            DeselectPiece();
+        }
+    }
+    
     private void Update()
     {
         HandleInput();
