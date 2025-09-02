@@ -1,0 +1,759 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// Manages checkmate and stalemate detection for 3D chess.
+/// Determines when a player has no legal moves and whether the game should end.
+/// Integrates with CheckDetectionManager and GameStateManager.
+/// </summary>
+public class GameEndDetectionManager : MonoBehaviour
+{
+    [Header("Game End Detection Settings")]
+    public bool enableGameEndDetection = true;
+    public bool debugMode = false;
+    
+    [Header("Events")]
+    public System.Action<PieceColor> OnCheckmate;
+    public System.Action<PieceColor> OnStalemate;
+    public System.Action<string> OnGameEnd; // reason for game end
+    
+    // New forfeit and draw events
+    public System.Action<PieceColor> OnForfeit; // player who forfeited
+    public System.Action<PieceColor> OnDrawOffered; // player who offered draw
+    public System.Action<PieceColor> OnDrawAccepted; // player who accepted draw
+    public System.Action<PieceColor> OnDrawDeclined; // player who declined draw
+    
+    public static GameEndDetectionManager Instance { get; private set; }
+    
+    // Draw offer state tracking
+    private bool drawOfferPending = false;
+    private PieceColor drawOfferingPlayer;
+    private float drawOfferTimestamp;
+    
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+            Debug.Log("GameEndDetectionManager: Instance created");
+        }
+        else
+        {
+            Debug.LogWarning("GameEndDetectionManager: Multiple instances detected, destroying duplicate");
+            Destroy(gameObject);
+        }
+    }
+    
+    private void Start()
+    {
+        // Subscribe to game state changes
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.OnStateChanged += OnGameStateChanged;
+        }
+        
+        // Subscribe to check detection events
+        if (CheckDetectionManager.Instance != null)
+        {
+            CheckDetectionManager.Instance.OnKingInCheck += OnKingInCheckDetected;
+        }
+        
+        // Subscribe to turn manager events
+        if (TurnManager.Instance != null)
+        {
+            TurnManager.Instance.OnTurnChanged += OnTurnChanged;
+        }
+        
+        // Subscribe to timer events for timed play mode
+        if (TimerManager.Instance != null)
+        {
+            TimerManager.Instance.OnTimerExpired += OnTimerExpired;
+        }
+    }
+    
+    private void OnDestroy()
+    {
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.OnStateChanged -= OnGameStateChanged;
+        }
+        
+        if (CheckDetectionManager.Instance != null)
+        {
+            CheckDetectionManager.Instance.OnKingInCheck -= OnKingInCheckDetected;
+        }
+        
+        if (TurnManager.Instance != null)
+        {
+            TurnManager.Instance.OnTurnChanged -= OnTurnChanged;
+        }
+        
+        if (TimerManager.Instance != null)
+        {
+            TimerManager.Instance.OnTimerExpired -= OnTimerExpired;
+        }
+    }
+    
+    private void OnGameStateChanged(GameState newState)
+    {
+        if (newState == GameState.Playing)
+        {
+            Debug.Log("GameEndDetectionManager: Game started - enabling game end detection");
+            enableGameEndDetection = true;
+        }
+        else if (newState == GameState.GameOver)
+        {
+            Debug.Log("GameEndDetectionManager: Game ended - disabling game end detection");
+            enableGameEndDetection = false;
+        }
+    }
+    
+    private void OnKingInCheckDetected(PieceColor kingColor)
+    {
+        if (!enableGameEndDetection) return;
+        
+        // When a king is in check, immediately check for checkmate
+        if (IsCheckmate(kingColor))
+        {
+            HandleCheckmate(kingColor);
+        }
+    }
+    
+    private void OnTurnChanged(PieceColor newCurrentPlayer)
+    {
+        if (!enableGameEndDetection) return;
+        
+        // When a turn changes, check if the new current player has any legal moves
+        if (!HasLegalMoves(newCurrentPlayer))
+        {
+            // No legal moves - check if it's checkmate or stalemate
+            if (CheckDetectionManager.Instance != null && CheckDetectionManager.Instance.IsKingInCheck(newCurrentPlayer))
+            {
+                HandleCheckmate(newCurrentPlayer);
+            }
+            else
+            {
+                HandleStalemate(newCurrentPlayer);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Handle timer expiry - end the game with the opposing player winning
+    /// </summary>
+    private void OnTimerExpired(PieceColor playerWhoRanOutOfTime)
+    {
+        if (!enableGameEndDetection)
+        {
+            Debug.LogWarning("GameEndDetectionManager: Timer expiry ignored - game end detection disabled");
+            return;
+        }
+        
+        // Validate game state
+        if (GameStateManager.Instance == null || GameStateManager.Instance.currentState != GameState.Playing)
+        {
+            Debug.LogWarning("GameEndDetectionManager: Timer expiry ignored - not in playing state");
+            return;
+        }
+        
+        PieceColor winner = (playerWhoRanOutOfTime == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+        string reason = $"Time Out! {winner} wins - {playerWhoRanOutOfTime} ran out of time";
+        
+        Debug.Log($"⏰ GameEndDetectionManager: TIMER EXPIRED - {reason}");
+        
+        // Stop timers immediately (defensive - timer should already be stopped but ensure it)
+        if (TimerManager.Instance != null)
+        {
+            TimerManager.Instance.StopAllTimers();
+            Debug.Log("🛑 GameEndDetectionManager: Stopped all timers due to timer expiry");
+        }
+        
+        // Clear any pending draw offers
+        ClearDrawOffer();
+        
+        // Fire events
+        OnGameEnd?.Invoke(reason);
+        
+        // End the game
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.ChangeState(GameState.GameOver);
+        }
+        
+        Debug.Log($"🏁 GAME OVER: {reason}");
+    }
+    
+    /// <summary>
+    /// Check if a player has any legal moves available
+    /// </summary>
+    /// <param name="player">Player to check</param>
+    /// <returns>True if player has legal moves</returns>
+    public bool HasLegalMoves(PieceColor player)
+    {
+        if (!enableGameEndDetection || ChessBoard.Instance == null)
+        {
+            return true; // Assume player has moves if detection is disabled
+        }
+        
+        int totalLegalMoves = 0;
+        
+        // Check all pieces of the specified color
+        for (int x = 0; x < 4; x++)
+        {
+            for (int y = 0; y < 4; y++)
+            {
+                for (int z = 0; z < 4; z++)
+                {
+                    BoardPosition pos = new BoardPosition(x, y, z);
+                    ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
+                    
+                    if (piece != null && piece.pieceColor == player)
+                    {
+                        List<BoardPosition> legalMoves = piece.GetLegalMoves();
+                        totalLegalMoves += legalMoves.Count;
+                        
+                        if (debugMode)
+                        {
+                            Debug.Log($"GameEndDetectionManager: {player} {piece.pieceType} at {pos} has {legalMoves.Count} legal moves");
+                        }
+                        
+                        // Early exit if we find any legal move
+                        if (legalMoves.Count > 0)
+                        {
+                            if (debugMode)
+                            {
+                                Debug.Log($"GameEndDetectionManager: {player} has legal moves (found {legalMoves.Count} moves for {piece.pieceType})");
+                            }
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (debugMode)
+        {
+            Debug.Log($"GameEndDetectionManager: {player} has NO legal moves (total: {totalLegalMoves})");
+        }
+        
+        return false;
+    }
+    
+    /// <summary>
+    /// Check if a player is in checkmate (king in check + no legal moves)
+    /// </summary>
+    /// <param name="player">Player to check</param>
+    /// <returns>True if player is in checkmate</returns>
+    public bool IsCheckmate(PieceColor player)
+    {
+        if (!enableGameEndDetection)
+        {
+            return false;
+        }
+        
+        // Checkmate requires both: king in check AND no legal moves
+        bool kingInCheck = CheckDetectionManager.Instance != null && 
+                          CheckDetectionManager.Instance.IsKingInCheck(player);
+        bool hasNoLegalMoves = !HasLegalMoves(player);
+        
+        bool isCheckmate = kingInCheck && hasNoLegalMoves;
+        
+        if (debugMode)
+        {
+            Debug.Log($"GameEndDetectionManager: Checkmate check for {player} - King in check: {kingInCheck}, No legal moves: {hasNoLegalMoves}, Result: {isCheckmate}");
+        }
+        
+        return isCheckmate;
+    }
+    
+    /// <summary>
+    /// Check if a player is in stalemate (king not in check + no legal moves)
+    /// </summary>
+    /// <param name="player">Player to check</param>
+    /// <returns>True if player is in stalemate</returns>
+    public bool IsStalemate(PieceColor player)
+    {
+        if (!enableGameEndDetection)
+        {
+            return false;
+        }
+        
+        // Stalemate requires: king NOT in check AND no legal moves
+        bool kingNotInCheck = CheckDetectionManager.Instance == null || 
+                             !CheckDetectionManager.Instance.IsKingInCheck(player);
+        bool hasNoLegalMoves = !HasLegalMoves(player);
+        
+        bool isStalemate = kingNotInCheck && hasNoLegalMoves;
+        
+        if (debugMode)
+        {
+            Debug.Log($"GameEndDetectionManager: Stalemate check for {player} - King not in check: {kingNotInCheck}, No legal moves: {hasNoLegalMoves}, Result: {isStalemate}");
+        }
+        
+        return isStalemate;
+    }
+    
+    /// <summary>
+    /// Handle checkmate detection - end the game
+    /// </summary>
+    private void HandleCheckmate(PieceColor checkmatedPlayer)
+    {
+        PieceColor winner = (checkmatedPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+        string reason = $"Checkmate! {winner} wins by checkmate against {checkmatedPlayer}";
+        
+        Debug.Log($"🏁 GameEndDetectionManager: CHECKMATE DETECTED - {reason}");
+        
+        // Stop timers immediately to prevent them from continuing after checkmate
+        if (TimerManager.Instance != null)
+        {
+            TimerManager.Instance.StopAllTimers();
+            Debug.Log("🛑 GameEndDetectionManager: Stopped all timers due to checkmate");
+        }
+        
+        // Fire events
+        OnCheckmate?.Invoke(checkmatedPlayer);
+        OnGameEnd?.Invoke(reason);
+        
+        // End the game
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.ChangeState(GameState.GameOver);
+        }
+        
+        // Show checkmate message (could be enhanced with UI later)
+        Debug.Log($"🏁 GAME OVER: {reason}");
+    }
+    
+    /// <summary>
+    /// Handle stalemate detection - end the game in a draw
+    /// </summary>
+    private void HandleStalemate(PieceColor stalematedPlayer)
+    {
+        string reason = $"Stalemate! Game ends in a draw - {stalematedPlayer} has no legal moves but is not in check";
+        
+        Debug.Log($"🏁 GameEndDetectionManager: STALEMATE DETECTED - {reason}");
+        
+        // Stop timers immediately to prevent them from continuing after stalemate
+        if (TimerManager.Instance != null)
+        {
+            TimerManager.Instance.StopAllTimers();
+            Debug.Log("🛑 GameEndDetectionManager: Stopped all timers due to stalemate");
+        }
+        
+        // Fire events
+        OnStalemate?.Invoke(stalematedPlayer);
+        OnGameEnd?.Invoke(reason);
+        
+        // End the game
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.ChangeState(GameState.GameOver);
+        }
+        
+        // Show stalemate message (could be enhanced with UI later)
+        Debug.Log($"🏁 GAME OVER: {reason}");
+    }
+    
+    /// <summary>
+    /// Manually check for game end conditions for the current player
+    /// </summary>
+    public void CheckForGameEnd()
+    {
+        if (!enableGameEndDetection || TurnManager.Instance == null)
+        {
+            return;
+        }
+        
+        PieceColor currentPlayer = TurnManager.Instance.GetCurrentPlayer();
+        
+        if (debugMode)
+        {
+            Debug.Log($"GameEndDetectionManager: Checking game end conditions for {currentPlayer}");
+        }
+        
+        if (IsCheckmate(currentPlayer))
+        {
+            HandleCheckmate(currentPlayer);
+        }
+        else if (IsStalemate(currentPlayer))
+        {
+            HandleStalemate(currentPlayer);
+        }
+        else if (debugMode)
+        {
+            Debug.Log($"GameEndDetectionManager: {currentPlayer} can continue playing");
+        }
+    }
+    
+    /// <summary>
+    /// Get debug information about current game end state
+    /// </summary>
+    /// <returns>Debug string with game end state information</returns>
+    public string GetDebugInfo()
+    {
+        if (!enableGameEndDetection)
+        {
+            return "Game end detection disabled";
+        }
+        
+        if (TurnManager.Instance == null)
+        {
+            return "TurnManager not available";
+        }
+        
+        PieceColor currentPlayer = TurnManager.Instance.GetCurrentPlayer();
+        bool hasLegalMoves = HasLegalMoves(currentPlayer);
+        bool kingInCheck = CheckDetectionManager.Instance != null && 
+                          CheckDetectionManager.Instance.IsKingInCheck(currentPlayer);
+        
+        string info = $"Current Player: {currentPlayer}\n";
+        info += $"Has Legal Moves: {hasLegalMoves}\n";
+        info += $"King in Check: {kingInCheck}\n";
+        
+        if (!hasLegalMoves)
+        {
+            if (kingInCheck)
+            {
+                info += "STATUS: CHECKMATE!";
+            }
+            else
+            {
+                info += "STATUS: STALEMATE!";
+            }
+        }
+        else
+        {
+            info += "STATUS: Game continues";
+        }
+        
+        return info;
+    }
+    
+    /// <summary>
+    /// Count total legal moves for a player (useful for debugging)
+    /// </summary>
+    /// <param name="player">Player to count moves for</param>
+    /// <returns>Total number of legal moves</returns>
+    public int CountLegalMoves(PieceColor player)
+    {
+        if (!enableGameEndDetection || ChessBoard.Instance == null)
+        {
+            return -1; // Invalid count
+        }
+        
+        int totalMoves = 0;
+        
+        for (int x = 0; x < 4; x++)
+        {
+            for (int y = 0; y < 4; y++)
+            {
+                for (int z = 0; z < 4; z++)
+                {
+                    BoardPosition pos = new BoardPosition(x, y, z);
+                    ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
+                    
+                    if (piece != null && piece.pieceColor == player)
+                    {
+                        totalMoves += piece.GetLegalMoves().Count;
+                    }
+                }
+            }
+        }
+        
+        return totalMoves;
+    }
+    
+    /// <summary>
+    /// Handle draw by repetition (called by TurnManager when 3-fold repetition is detected)
+    /// </summary>
+    public void HandleDrawByRepetition()
+    {
+        if (!enableGameEndDetection)
+        {
+            Debug.LogWarning("GameEndDetectionManager: Draw by repetition ignored - game end detection disabled");
+            return;
+        }
+        
+        string reason = "Draw by repetition! The same position has occurred three times";
+        
+        Debug.Log($"🏁 GameEndDetectionManager: DRAW BY REPETITION DETECTED - {reason}");
+        
+        // Stop timers immediately to prevent them from continuing after repetition draw
+        if (TimerManager.Instance != null)
+        {
+            TimerManager.Instance.StopAllTimers();
+            Debug.Log("🛑 GameEndDetectionManager: Stopped all timers due to draw by repetition");
+        }
+        
+        // Fire events
+        OnGameEnd?.Invoke(reason);
+        
+        // End the game
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.ChangeState(GameState.GameOver);
+        }
+        
+        // Show draw message
+        Debug.Log($"🏁 GAME OVER: {reason}");
+    }
+    
+    // ===== FORFEIT AND DRAW MECHANICS =====
+    
+    /// <summary>
+    /// Handle a forfeit request from a player
+    /// </summary>
+    /// <param name="forfeitingPlayer">The player who wants to forfeit</param>
+    public void HandleForfeit(PieceColor forfeitingPlayer)
+    {
+        if (!enableGameEndDetection)
+        {
+            Debug.LogWarning("GameEndDetectionManager: Forfeit ignored - game end detection disabled");
+            return;
+        }
+        
+        // Validate game state
+        if (GameStateManager.Instance == null || !GameStateManager.Instance.CanMovePieces())
+        {
+            Debug.LogWarning("GameEndDetectionManager: Forfeit ignored - not in playing state");
+            return;
+        }
+        
+        // Validate it's the forfeiting player's turn (optional - could allow forfeit anytime)
+        if (TurnManager.Instance != null && TurnManager.Instance.GetCurrentPlayer() != forfeitingPlayer)
+        {
+            Debug.LogWarning($"GameEndDetectionManager: {forfeitingPlayer} tried to forfeit but it's {TurnManager.Instance.GetCurrentPlayer()}'s turn");
+            // Allow forfeit anyway - players can forfeit anytime
+        }
+        
+        // Allow both human and AI players to forfeit
+        // AI forfeit decisions should come from AIPlayer logic
+        if (TurnManager.Instance != null && TurnManager.Instance.IsPlayerAI(forfeitingPlayer))
+        {
+            Debug.Log($"GameEndDetectionManager: Processing AI player {forfeitingPlayer} forfeit");
+        }
+        
+        PieceColor winner = (forfeitingPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+        string reason = $"Forfeit! {winner} wins by forfeit - {forfeitingPlayer} forfeited the game";
+        
+        Debug.Log($"🏁 GameEndDetectionManager: FORFEIT - {reason}");
+        
+        // Stop timers immediately to prevent them from continuing after forfeit
+        if (TimerManager.Instance != null)
+        {
+            TimerManager.Instance.StopAllTimers();
+            Debug.Log("🛑 GameEndDetectionManager: Stopped all timers due to forfeit");
+        }
+        
+        // Clear any pending draw offers
+        ClearDrawOffer();
+        
+        // Fire events
+        OnForfeit?.Invoke(forfeitingPlayer);
+        OnGameEnd?.Invoke(reason);
+        
+        // End the game
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.ChangeState(GameState.GameOver);
+        }
+        
+        Debug.Log($"🏁 GAME OVER: {reason}");
+    }
+    
+    /// <summary>
+    /// Handle a draw offer from a player
+    /// </summary>
+    /// <param name="offeringPlayer">The player who is offering a draw</param>
+    public void HandleDrawOffer(PieceColor offeringPlayer)
+    {
+        if (!enableGameEndDetection)
+        {
+            Debug.LogWarning("GameEndDetectionManager: Draw offer ignored - game end detection disabled");
+            return;
+        }
+        
+        // Validate game state
+        if (GameStateManager.Instance == null || !GameStateManager.Instance.CanMovePieces())
+        {
+            Debug.LogWarning("GameEndDetectionManager: Draw offer ignored - not in playing state");
+            return;
+        }
+        
+        // Validate it's the offering player's turn
+        if (TurnManager.Instance == null || TurnManager.Instance.GetCurrentPlayer() != offeringPlayer)
+        {
+            Debug.LogWarning($"GameEndDetectionManager: {offeringPlayer} tried to offer draw but it's not their turn");
+            return;
+        }
+        
+        // Allow both human and AI players to offer draws
+        // AI draw decisions should come from AIPlayer logic
+        if (TurnManager.Instance.IsPlayerAI(offeringPlayer))
+        {
+            Debug.Log($"GameEndDetectionManager: Processing AI player {offeringPlayer} draw offer");
+        }
+        
+        // Check if there's already a pending draw offer
+        if (drawOfferPending)
+        {
+            Debug.LogWarning($"GameEndDetectionManager: Draw offer from {offeringPlayer} ignored - another offer is pending");
+            return;
+        }
+        
+        // Set draw offer state
+        drawOfferPending = true;
+        drawOfferingPlayer = offeringPlayer;
+        drawOfferTimestamp = Time.time;
+        
+        Debug.Log($"🤝 GameEndDetectionManager: Draw offered by {offeringPlayer}");
+        
+        // Fire event
+        OnDrawOffered?.Invoke(offeringPlayer);
+        
+        // If the responding player is AI, immediately trigger their response evaluation
+        PieceColor respondingPlayer = (offeringPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+        if (TurnManager.Instance != null && TurnManager.Instance.IsPlayerAI(respondingPlayer))
+        {
+            Debug.Log($"🤖 GameEndDetectionManager: Draw offer made to AI player {respondingPlayer}, triggering response evaluation");
+            
+            if (AIPlayer.Instance != null)
+            {
+                AIPlayer.Instance.HandleDrawOfferResponse(respondingPlayer);
+            }
+            else
+            {
+                Debug.LogError("GameEndDetectionManager: AIPlayer.Instance is null - cannot handle AI draw response");
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Handle a draw response (accept or decline)
+    /// </summary>
+    /// <param name="respondingPlayer">The player responding to the draw offer</param>
+    /// <param name="accepted">True if accepting, false if declining</param>
+    public void HandleDrawResponse(PieceColor respondingPlayer, bool accepted)
+    {
+        if (!enableGameEndDetection)
+        {
+            Debug.LogWarning("GameEndDetectionManager: Draw response ignored - game end detection disabled");
+            return;
+        }
+        
+        // Validate there's a pending draw offer
+        if (!drawOfferPending)
+        {
+            Debug.LogWarning($"GameEndDetectionManager: {respondingPlayer} tried to respond to draw but no offer is pending");
+            return;
+        }
+        
+        // Validate this is the correct player responding (the one who didn't offer)
+        PieceColor expectedResponder = (drawOfferingPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+        if (respondingPlayer != expectedResponder)
+        {
+            Debug.LogWarning($"GameEndDetectionManager: {respondingPlayer} cannot respond to draw offer made by {drawOfferingPlayer}");
+            return;
+        }
+        
+        // Allow both human and AI players to respond to draws
+        // AI draw responses should come from AIPlayer logic
+        if (TurnManager.Instance != null && TurnManager.Instance.IsPlayerAI(respondingPlayer))
+        {
+            Debug.Log($"GameEndDetectionManager: Processing AI player {respondingPlayer} draw response");
+        }
+        
+        if (accepted)
+        {
+            // Draw accepted - end game in draw
+            string reason = $"Draw by agreement! Both players agreed to a draw";
+            
+            Debug.Log($"🤝 GameEndDetectionManager: DRAW ACCEPTED - {reason}");
+            
+            // Stop timers immediately to prevent them from continuing after draw acceptance
+            if (TimerManager.Instance != null)
+            {
+                TimerManager.Instance.StopAllTimers();
+                Debug.Log("🛑 GameEndDetectionManager: Stopped all timers due to draw acceptance");
+            }
+            
+            // Fire events
+            OnDrawAccepted?.Invoke(respondingPlayer);
+            OnGameEnd?.Invoke(reason);
+            
+            // End the game
+            if (GameStateManager.Instance != null)
+            {
+                GameStateManager.Instance.ChangeState(GameState.GameOver);
+            }
+            
+            Debug.Log($"🏁 GAME OVER: {reason}");
+        }
+        else
+        {
+            // Draw declined - continue game
+            Debug.Log($"🤝 GameEndDetectionManager: Draw declined by {respondingPlayer}");
+            
+            // Fire event
+            OnDrawDeclined?.Invoke(respondingPlayer);
+        }
+        
+        // Clear draw offer state
+        ClearDrawOffer();
+    }
+    
+    /// <summary>
+    /// Clear any pending draw offer
+    /// </summary>
+    public void ClearDrawOffer()
+    {
+        if (drawOfferPending)
+        {
+            Debug.Log($"GameEndDetectionManager: Clearing pending draw offer from {drawOfferingPlayer}");
+        }
+        
+        drawOfferPending = false;
+        drawOfferingPlayer = PieceColor.White; // Reset to default
+        drawOfferTimestamp = 0f;
+    }
+    
+    /// <summary>
+    /// Check if there's a pending draw offer
+    /// </summary>
+    public bool IsDrawOfferPending()
+    {
+        return drawOfferPending;
+    }
+    
+    /// <summary>
+    /// Get the player who made the pending draw offer
+    /// </summary>
+    public PieceColor GetDrawOfferingPlayer()
+    {
+        return drawOfferPending ? drawOfferingPlayer : PieceColor.White;
+    }
+    
+    /// <summary>
+    /// Get how long ago the draw offer was made (in seconds)
+    /// </summary>
+    public float GetDrawOfferAge()
+    {
+        return drawOfferPending ? (Time.time - drawOfferTimestamp) : 0f;
+    }
+    
+    /// <summary>
+    /// Auto-decline draw offers that are too old (optional feature)
+    /// </summary>
+    public void UpdateDrawOfferTimeout(float timeoutSeconds = 60f)
+    {
+        if (drawOfferPending && GetDrawOfferAge() > timeoutSeconds)
+        {
+            Debug.Log($"GameEndDetectionManager: Auto-declining draw offer from {drawOfferingPlayer} (timeout after {timeoutSeconds}s)");
+            
+            PieceColor autoDeclinedBy = (drawOfferingPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+            OnDrawDeclined?.Invoke(autoDeclinedBy);
+            
+            ClearDrawOffer();
+        }
+    }
+}
