@@ -9,13 +9,17 @@ public class TurnManager : MonoBehaviour
     [Header("Turn Settings")]
     public PieceColor currentPlayer = PieceColor.White;
     public bool enableTurnValidation = true;
-    
-    [Header("Player Types")]
+
+    [Header("Player Types - DEPRECATED: Use PlayerManager instead")]
+    [System.Obsolete("Use PlayerManager.GetPlayerType() instead. Kept for backwards compatibility with 2-player games.")]
     public PlayerType whitePlayerType = PlayerType.Human;
+    [System.Obsolete("Use PlayerManager.GetPlayerType() instead. Kept for backwards compatibility with 2-player games.")]
     public PlayerType blackPlayerType = PlayerType.Human;
-    
-    [Header("Check State Tracking")]
+
+    [Header("Check State Tracking - DEPRECATED: Use scalable dictionary in future")]
+    [System.Obsolete("Check tracking needs to be scalable for multi-player. Currently limited to 2 players.")]
     public bool whiteInCheck = false;
+    [System.Obsolete("Check tracking needs to be scalable for multi-player. Currently limited to 2 players.")]
     public bool blackInCheck = false;
     
     [Header("Opening Move Protection")]
@@ -243,7 +247,18 @@ public class TurnManager : MonoBehaviour
         }
         
         PieceColor previousPlayer = currentPlayer;
-        currentPlayer = (currentPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+
+        // Use PlayerManager for scalable turn cycling (supports 2-6 players)
+        if (PlayerManager.Instance != null)
+        {
+            currentPlayer = PlayerManager.Instance.GetNextPlayer(currentPlayer);
+        }
+        else
+        {
+            // Fallback to binary toggle for 2-player games if PlayerManager unavailable
+            Debug.LogWarning("TurnManager.NextTurn: PlayerManager not available, using fallback 2-player toggle");
+            currentPlayer = (currentPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+        }
         
         // Track moves for opening protection
         totalMovesMade++;
@@ -533,23 +548,41 @@ public class TurnManager : MonoBehaviour
     /// </summary>
     public void SetPlayerType(PieceColor color, PlayerType playerType)
     {
-        if (color == PieceColor.White)
+        // Use PlayerManager for scalable player type management
+        if (PlayerManager.Instance != null)
         {
-            whitePlayerType = playerType;
+            PlayerManager.Instance.SetPlayerType(color, playerType);
         }
         else
         {
-            blackPlayerType = playerType;
+            // Fallback for 2-player games
+            Debug.LogWarning("TurnManager.SetPlayerType: PlayerManager not available, using fallback");
+            if (color == PieceColor.White)
+            {
+                whitePlayerType = playerType;
+            }
+            else if (color == PieceColor.Black)
+            {
+                blackPlayerType = playerType;
+            }
         }
-        
+
         Debug.Log($"TurnManager: {color} player type set to {playerType}");
     }
-    
+
     /// <summary>
     /// Get the player type for a specific color
     /// </summary>
     public PlayerType GetPlayerType(PieceColor color)
     {
+        // Use PlayerManager for scalable player type retrieval
+        if (PlayerManager.Instance != null)
+        {
+            return PlayerManager.Instance.GetPlayerType(color);
+        }
+
+        // Fallback for 2-player games
+        Debug.LogWarning("TurnManager.GetPlayerType: PlayerManager not available, using fallback");
         return color == PieceColor.White ? whitePlayerType : blackPlayerType;
     }
     
@@ -571,24 +604,24 @@ public class TurnManager : MonoBehaviour
     
     /// <summary>
     /// Set up a game mode (Human vs Human, Human vs AI, etc.)
+    /// Simplified for 2-player games. For multi-player, configure via PlayerManager.
     /// </summary>
     public void SetGameMode(PlayerType whiteType, PlayerType blackType)
     {
-        PlayerType prevWhiteType = whitePlayerType;
-        PlayerType prevBlackType = blackPlayerType;
-        
-        whitePlayerType = whiteType;
-        blackPlayerType = blackType;
-        
+        PlayerType prevWhiteType = GetPlayerType(PieceColor.White);
+        PlayerType prevBlackType = GetPlayerType(PieceColor.Black);
+
+        SetPlayerType(PieceColor.White, whiteType);
+        SetPlayerType(PieceColor.Black, blackType);
+
         string gameMode = $"{whiteType} vs {blackType}";
         Debug.Log($"🎭 TurnManager: Game mode set to {gameMode} (was {prevWhiteType} vs {prevBlackType})");
-        Debug.Log($"🎭 TurnManager: White player type: {whitePlayerType}, Black player type: {blackPlayerType}");
         Debug.Log($"🎭 TurnManager: Current player: {currentPlayer}, IsCurrentPlayerAI(): {IsCurrentPlayerAI()}");
-        
+
         // Only trigger AI move if we're in playing state and it's an AI's turn
-        // Use immediate check to avoid cache delays  
-        if (GameStateManager.Instance != null && 
-            GameStateManager.Instance.CanMovePiecesImmediate() && 
+        // Use immediate check to avoid cache delays
+        if (GameStateManager.Instance != null &&
+            GameStateManager.Instance.CanMovePiecesImmediate() &&
             IsCurrentPlayerAI())
         {
             Debug.Log($"🎭 TurnManager: Triggering AI move for {currentPlayer} because they are AI");
@@ -599,38 +632,87 @@ public class TurnManager : MonoBehaviour
             Debug.Log($"🎭 TurnManager: NOT triggering AI move - GameState: {GameStateManager.Instance?.currentState}, CanMoveImmediate: {GameStateManager.Instance?.CanMovePiecesImmediate()}, IsCurrentPlayerAI: {IsCurrentPlayerAI()}");
         }
     }
-    
+
     /// <summary>
     /// Get a description of the current game mode
     /// </summary>
     public string GetGameModeDescription()
     {
-        return $"{whitePlayerType} vs {blackPlayerType}";
+        if (PlayerManager.Instance != null)
+        {
+            return PlayerManager.Instance.GetGameModeDescription();
+        }
+
+        // Fallback for 2-player games
+        return $"{GetPlayerType(PieceColor.White)} vs {GetPlayerType(PieceColor.Black)}";
     }
-    
+
     /// <summary>
-    /// Check if this is a Human vs AI game
+    /// Check if this is a Human vs AI game (any player count)
     /// </summary>
     public bool IsHumanVsAI()
     {
-        return (whitePlayerType == PlayerType.Human && blackPlayerType == PlayerType.Computer) ||
-               (whitePlayerType == PlayerType.Computer && blackPlayerType == PlayerType.Human);
+        if (PlayerManager.Instance != null)
+        {
+            int humanCount = 0;
+            int aiCount = 0;
+
+            foreach (PieceColor color in PlayerManager.Instance.GetAllPlayers())
+            {
+                if (GetPlayerType(color) == PlayerType.Human)
+                    humanCount++;
+                else
+                    aiCount++;
+            }
+
+            return humanCount > 0 && aiCount > 0;
+        }
+
+        // Fallback for 2-player games
+        PlayerType white = GetPlayerType(PieceColor.White);
+        PlayerType black = GetPlayerType(PieceColor.Black);
+        return (white == PlayerType.Human && black == PlayerType.Computer) ||
+               (white == PlayerType.Computer && black == PlayerType.Human);
     }
-    
+
     /// <summary>
-    /// Check if this is an AI vs AI game
+    /// Check if this is an AI vs AI game (all players AI)
     /// </summary>
     public bool IsAIVsAI()
     {
-        return whitePlayerType == PlayerType.Computer && blackPlayerType == PlayerType.Computer;
+        if (PlayerManager.Instance != null)
+        {
+            foreach (PieceColor color in PlayerManager.Instance.GetAllPlayers())
+            {
+                if (GetPlayerType(color) == PlayerType.Human)
+                    return false;
+            }
+            return true;
+        }
+
+        // Fallback for 2-player games
+        return GetPlayerType(PieceColor.White) == PlayerType.Computer &&
+               GetPlayerType(PieceColor.Black) == PlayerType.Computer;
     }
-    
+
     /// <summary>
-    /// Check if this is a Human vs Human game
+    /// Check if this is a Human vs Human game (all players human)
     /// </summary>
     public bool IsHumanVsHuman()
     {
-        return whitePlayerType == PlayerType.Human && blackPlayerType == PlayerType.Human;
+        if (PlayerManager.Instance != null)
+        {
+            foreach (PieceColor color in PlayerManager.Instance.GetAllPlayers())
+            {
+                if (GetPlayerType(color) == PlayerType.Computer)
+                    return false;
+            }
+            return true;
+        }
+
+        // Fallback for 2-player games
+        return GetPlayerType(PieceColor.White) == PlayerType.Human &&
+               GetPlayerType(PieceColor.Black) == PlayerType.Human;
     }
     
     /// <summary>
@@ -895,22 +977,27 @@ public class TurnManager : MonoBehaviour
     private string GeneratePositionHash()
     {
         if (ChessBoard.Instance == null) return "empty";
-        
+
         System.Text.StringBuilder hashBuilder = new System.Text.StringBuilder();
-        
+
         // Include current player in hash (same position but different player = different hash)
         hashBuilder.Append(currentPlayer == PieceColor.White ? "W:" : "B:");
-        
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
         // Generate hash based on piece positions
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
-                    
+
                     if (piece != null)
                     {
                         // Format: position|color|type
@@ -978,17 +1065,22 @@ public class TurnManager : MonoBehaviour
     private bool AnyPiecesStillAnimatingInternal()
     {
         if (ChessBoard.Instance == null) return false;
-        
-        // Check all positions on the 4x4x4 board for animating pieces
-        for (int x = 0; x < 4; x++)
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        // Check all positions on the board for animating pieces
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition position = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(position);
-                    
+
                     if (piece != null && piece.IsMoving)
                     {
                         Debug.Log($"🎬 TurnManager: Found animating piece - {piece.pieceColor} {piece.pieceType} at {position}");
@@ -998,7 +1090,7 @@ public class TurnManager : MonoBehaviour
                 }
             }
         }
-        
+
         return false;
     }
     
@@ -1272,8 +1364,17 @@ public class TurnManager : MonoBehaviour
         }
         
         PieceColor drawOfferingPlayer = GameEndDetectionManager.Instance.GetDrawOfferingPlayer();
-        PieceColor respondingPlayer = (drawOfferingPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-        
+
+        // For multi-player games, the responding player is typically the current player
+        // (the one whose turn it is when the draw response UI is shown)
+        PieceColor respondingPlayer = currentPlayer;
+
+        // Fallback for 2-player games: determine opponent if PlayerManager unavailable
+        if (PlayerManager.Instance == null && respondingPlayer == drawOfferingPlayer)
+        {
+            respondingPlayer = (drawOfferingPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+        }
+
         // Allow both human and AI players to respond to draws
         // For AI players, the response decision should come from AIPlayer class
         if (IsPlayerAI(respondingPlayer))
@@ -1336,9 +1437,17 @@ public class TurnManager : MonoBehaviour
         }
         
         PieceColor drawOfferingPlayer = GameEndDetectionManager.Instance.GetDrawOfferingPlayer();
-        PieceColor respondingPlayer = (drawOfferingPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-        
-        // Must be human player and the correct responder
-        return !IsPlayerAI(respondingPlayer);
+
+        // For multi-player games, the responding player is typically the current player
+        PieceColor respondingPlayer = currentPlayer;
+
+        // Fallback for 2-player games: determine opponent if needed
+        if (PlayerManager.Instance == null && respondingPlayer == drawOfferingPlayer)
+        {
+            respondingPlayer = (drawOfferingPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+        }
+
+        // Must be human player and the correct responder (not the one who offered)
+        return !IsPlayerAI(respondingPlayer) && respondingPlayer != drawOfferingPlayer;
     }
 }

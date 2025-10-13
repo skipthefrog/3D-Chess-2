@@ -181,8 +181,18 @@ public class AIPlayer : MonoBehaviour
             return;
         }
         
-        // Check piece tray availability
-        PieceTray playerTray = (playerColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+        // Check piece tray availability using PieceTrayManager for scalability
+        PieceTray playerTray = null;
+        if (PieceTrayManager.Instance != null)
+        {
+            playerTray = PieceTrayManager.Instance.GetTray(playerColor);
+        }
+        else
+        {
+            // Fallback for 2-player games
+            playerTray = (playerColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+        }
+
         if (playerTray == null)
         {
             Debug.LogError($"🚨 AIPlayer: {playerColor} tray is NULL - cannot access pieces for placement");
@@ -235,19 +245,24 @@ public class AIPlayer : MonoBehaviour
         // DEFENSIVE: Ensure pieces are actually on the board before trying to move
         if (ChessBoard.Instance != null)
         {
+            // Get dynamic board dimensions from BoardDimensionsManager
+            Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+                ? BoardDimensionsManager.Instance.GetDimensions()
+                : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
             int piecesOnBoard = 0;
-            for (int x = 0; x < 4; x++)
+            for (int x = 0; x < boardDimensions.x; x++)
             {
-                for (int y = 0; y < 4; y++)
+                for (int y = 0; y < boardDimensions.y; y++)
                 {
-                    for (int z = 0; z < 4; z++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                     {
                         if (ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z)) != null)
                             piecesOnBoard++;
                     }
                 }
             }
-            
+
             if (piecesOnBoard == 0)
             {
                 Debug.LogWarning($"🛡️ AIPlayer: No pieces found on board - game may still be in placement phase, aborting AI move");
@@ -255,7 +270,7 @@ public class AIPlayer : MonoBehaviour
                 OnAIThinkingFinished?.Invoke(playerColor);
                 yield break;
             }
-            
+
             if (enableDebugLogging)
                 Debug.Log($"🛡️ AIPlayer: Found {piecesOnBoard} pieces on board, proceeding with AI move");
         }
@@ -724,11 +739,16 @@ public class AIPlayer : MonoBehaviour
         int count = 0;
         if (ChessBoard.Instance != null)
         {
-            for (int x = 0; x < 4; x++)
+            // Get dynamic board dimensions from BoardDimensionsManager
+            Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+                ? BoardDimensionsManager.Instance.GetDimensions()
+                : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+            for (int x = 0; x < boardDimensions.x; x++)
             {
-                for (int y = 0; y < 4; y++)
+                for (int y = 0; y < boardDimensions.y; y++)
                 {
-                    for (int z = 0; z < 4; z++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                     {
                         if (ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z)) != null)
                         {
@@ -932,17 +952,26 @@ public class AIPlayer : MonoBehaviour
     /// </summary>
     private bool ShouldContinuePlacement(PieceColor playerColor)
     {
-        // Check if the player's tray still has pieces
-        PieceTray playerTray = (playerColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
-        
+        // Check if the player's tray still has pieces using PieceTrayManager for scalability
+        PieceTray playerTray = null;
+        if (PieceTrayManager.Instance != null)
+        {
+            playerTray = PieceTrayManager.Instance.GetTray(playerColor);
+        }
+        else
+        {
+            // Fallback for 2-player games
+            playerTray = (playerColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+        }
+
         if (playerTray == null)
         {
             return false;
         }
-        
+
         int remainingPieces = playerTray.GetPieceCount();
         Debug.Log($"AIPlayer: {playerColor} has {remainingPieces} pieces remaining in tray");
-        
+
         return remainingPieces > 0;
     }
     

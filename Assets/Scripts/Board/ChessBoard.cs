@@ -13,10 +13,13 @@ public class ChessBoard : MonoBehaviour
     [Header("Board Structure")]
     public GameObject boardCellPrefab;
     public Transform boardContainer;
-    
-    private GameObject[,,] boardCells = new GameObject[4, 4, 4];
-    private ChessPiece[,,] pieces = new ChessPiece[4, 4, 4];
+
+    private GameObject[,,] boardCells;
+    private ChessPiece[,,] pieces;
     private List<BoardPosition> highlightedPositions = new List<BoardPosition>();
+
+    // Cached board dimensions for performance
+    private Vector3Int boardDimensions;
     
     // Simulation mode tracking - prevents corruption checks during temporary move testing
     private bool _isSimulationMode = false;
@@ -73,7 +76,20 @@ public class ChessBoard : MonoBehaviour
     private void InitializeBoard()
     {
         Debug.Log("ChessBoard: Starting board initialization...");
-        
+
+        // Get board dimensions from BoardDimensionsManager
+        if (BoardDimensionsManager.Instance != null)
+        {
+            boardDimensions = BoardDimensionsManager.Instance.GetDimensions();
+            Debug.Log($"ChessBoard: Using board dimensions {boardDimensions.x}x{boardDimensions.y}x{boardDimensions.z}");
+        }
+        else
+        {
+            // Fallback to default 4x4x4 if manager not available
+            boardDimensions = new Vector3Int(4, 4, 4);
+            Debug.LogWarning("ChessBoard: BoardDimensionsManager not available, using default 4x4x4");
+        }
+
         if (boardContainer == null)
         {
             GameObject containerObject = new GameObject("Board Container");
@@ -81,38 +97,38 @@ public class ChessBoard : MonoBehaviour
             boardContainer = containerObject.transform;
             Debug.Log("ChessBoard: Created board container");
         }
-        
+
         CreateDefaultMaterials();
         // Skip visual board creation - using EmergencyChessBoard for visuals
         // CreateBoardStructure();
         InitializeLogicalBoard();
-        
+
         // Clear any existing pieces from the board during initialization
         ClearAllPieces();
-        
+
         // Clean up any orphaned King GameObjects from the scene
         CleanUpOrphanedPieces();
-        
+
         Debug.Log("ChessBoard: Board initialization complete!");
     }
     
     private void CreateBoardStructure()
     {
-        Debug.Log("ChessBoard: Creating 4x4x4 board structure...");
-        
+        Debug.Log($"ChessBoard: Creating {boardDimensions.x}x{boardDimensions.y}x{boardDimensions.z} board structure...");
+
         int cellCount = 0;
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     CreateBoardCell(new BoardPosition(x, y, z));
                     cellCount++;
                 }
             }
         }
-        
+
         Debug.Log($"ChessBoard: Created {cellCount} board cells");
         CenterBoard();
         Debug.Log("ChessBoard: Board centered and positioned");
@@ -121,14 +137,16 @@ public class ChessBoard : MonoBehaviour
     private void InitializeLogicalBoard()
     {
         Debug.Log("ChessBoard: Initializing logical board structure (no visuals)...");
-        
-        // Initialize pieces array only - no visual elements
-        pieces = new ChessPiece[4, 4, 4];
-        
+
+        // Initialize arrays based on board dimensions
+        boardCells = new GameObject[boardDimensions.x, boardDimensions.y, boardDimensions.z];
+        pieces = new ChessPiece[boardDimensions.x, boardDimensions.y, boardDimensions.z];
+
         // Position board container to match EmergencyChessBoard coordinate system
-        Vector3 centerOffset = new Vector3(-1.5f * cellSize, -1.5f * cellSize, -1.5f * cellSize);
+        float halfSize = (boardDimensions.x - 1) * 0.5f;
+        Vector3 centerOffset = new Vector3(-halfSize * cellSize, -halfSize * cellSize, -halfSize * cellSize);
         boardContainer.localPosition = centerOffset;
-        
+
         Debug.Log("ChessBoard: Logical board initialized with matching coordinate system");
     }
     
@@ -244,7 +262,8 @@ public class ChessBoard : MonoBehaviour
     
     private void CenterBoard()
     {
-        Vector3 centerOffset = new Vector3(-1.5f * cellSize, -1.5f * cellSize, -1.5f * cellSize);
+        float halfSize = (boardDimensions.x - 1) * 0.5f;
+        Vector3 centerOffset = new Vector3(-halfSize * cellSize, -halfSize * cellSize, -halfSize * cellSize);
         boardContainer.localPosition = centerOffset;
     }
     
@@ -338,11 +357,11 @@ public class ChessBoard : MonoBehaviour
             {
                 // Check if this piece is already registered somewhere else
                 bool foundDuplicate = false;
-                for (int x = 0; x < 4 && !foundDuplicate; x++)
+                for (int x = 0; x < boardDimensions.x && !foundDuplicate; x++)
                 {
-                    for (int y = 0; y < 4 && !foundDuplicate; y++)
+                    for (int y = 0; y < boardDimensions.y && !foundDuplicate; y++)
                     {
-                        for (int z = 0; z < 4 && !foundDuplicate; z++)
+                        for (int z = 0; z < boardDimensions.z && !foundDuplicate; z++)
                         {
                             BoardPosition checkPos = new BoardPosition(x, y, z);
                             if (checkPos != position && pieces[x, y, z] == piece)
@@ -438,18 +457,18 @@ public class ChessBoard : MonoBehaviour
     public void ValidateBoardConsistency()
     {
         Debug.Log("🔍 ChessBoard.ValidateBoardConsistency: Starting board validation...");
-        
+
         int inconsistencies = 0;
-        
-        for (int x = 0; x < 4; x++)
+
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition boardPos = new BoardPosition(x, y, z);
                     ChessPiece piece = pieces[x, y, z];
-                    
+
                     if (piece != null)
                     {
                         // Check if piece thinks it's at this position
@@ -492,12 +511,12 @@ public class ChessBoard : MonoBehaviour
             // RECOVERY MECHANISM: Try to find the piece anywhere on the board
             ChessPiece foundPiece = null;
             BoardPosition actualPosition = new BoardPosition(-1, -1, -1);
-            
-            for (int x = 0; x < 4 && foundPiece == null; x++)
+
+            for (int x = 0; x < boardDimensions.x && foundPiece == null; x++)
             {
-                for (int y = 0; y < 4 && foundPiece == null; y++)
+                for (int y = 0; y < boardDimensions.y && foundPiece == null; y++)
                 {
-                    for (int z = 0; z < 4 && foundPiece == null; z++)
+                    for (int z = 0; z < boardDimensions.z && foundPiece == null; z++)
                     {
                         ChessPiece candidatePiece = pieces[x, y, z];
                         if (candidatePiece != null && candidatePiece.CurrentPosition == from)
@@ -737,11 +756,11 @@ public class ChessBoard : MonoBehaviour
     public List<BoardPosition> GetAllPositions()
     {
         List<BoardPosition> positions = new List<BoardPosition>();
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     positions.Add(new BoardPosition(x, y, z));
                 }
@@ -756,13 +775,13 @@ public class ChessBoard : MonoBehaviour
     public void ClearAllPieces()
     {
         Debug.Log("ChessBoard: Clearing all pieces from board...");
-        
+
         int clearedCount = 0;
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     if (pieces[x, y, z] != null)
                     {
@@ -778,7 +797,7 @@ public class ChessBoard : MonoBehaviour
                 }
             }
         }
-        
+
         Debug.Log($"ChessBoard: Cleared {clearedCount} orphaned pieces from board");
     }
     
@@ -829,11 +848,11 @@ public class ChessBoard : MonoBehaviour
     public List<BoardPosition> GetEmptyPositions()
     {
         List<BoardPosition> emptyPositions = new List<BoardPosition>();
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     if (GetPieceAt(pos) == null)
@@ -915,13 +934,13 @@ public class ChessBoard : MonoBehaviour
         int totalPieces = 0;
         int nullSlots = 0;
         int syncIssues = 0;
-        
-        for (int y = 3; y >= 0; y--) // Top to bottom
+
+        for (int y = boardDimensions.y - 1; y >= 0; y--) // Top to bottom
         {
-            for (int x = 0; x < 4; x++)
+            for (int x = 0; x < boardDimensions.x; x++)
             {
                 string line = $"Y={y}: ";
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     ChessPiece piece = pieces[x, y, z];
                     if (piece != null)
@@ -930,7 +949,7 @@ public class ChessBoard : MonoBehaviour
                         string typeCode = piece.pieceType.ToString().Substring(0, 1);
                         line += $"[{colorCode}{typeCode}({x},{y},{z})] ";
                         totalPieces++;
-                        
+
                         // Check if piece's currentPosition matches array position
                         if (piece.CurrentPosition != new BoardPosition(x, y, z))
                         {
@@ -965,25 +984,25 @@ public class ChessBoard : MonoBehaviour
     public void RepairBoardSynchronization()
     {
         Debug.Log("🔧 === STARTING BOARD SYNCHRONIZATION REPAIR ===");
-        
+
         int repairedPieces = 0;
         int clearedSlots = 0;
-        
-        for (int x = 0; x < 4; x++)
+
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition boardPos = new BoardPosition(x, y, z);
                     ChessPiece piece = pieces[x, y, z];
-                    
+
                     if (piece != null)
                     {
                         if (piece.CurrentPosition != boardPos)
                         {
                             Debug.Log($"🔧 REPAIR: Fixing piece at board[{boardPos}] (thinks it's at {piece.CurrentPosition})");
-                            
+
                             // Check if piece's claimed position conflicts with another piece
                             BoardPosition claimedPos = piece.CurrentPosition;
                             if (claimedPos.IsValid())
@@ -1082,13 +1101,13 @@ public class ChessBoard : MonoBehaviour
                 {
                     Debug.LogError($"   🚨 INVALID POSITION: {rook.CurrentPosition}");
                     invalidBlackRooks++;
-                    
+
                     // Try to find where this rook is in the board array
-                    for (int x = 0; x < 4; x++)
+                    for (int x = 0; x < boardDimensions.x; x++)
                     {
-                        for (int y = 0; y < 4; y++)
+                        for (int y = 0; y < boardDimensions.y; y++)
                         {
-                            for (int z = 0; z < 4; z++)
+                            for (int z = 0; z < boardDimensions.z; z++)
                             {
                                 ChessPiece foundPiece = pieces[x, y, z];
                                 if (foundPiece == rook)
@@ -1285,11 +1304,11 @@ public class ChessBoard : MonoBehaviour
         
         // Validate board consistency after cleanup
         int positionRepairs = 0;
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     ChessPiece piece = pieces[x, y, z];
                     if (piece != null)
@@ -1417,44 +1436,44 @@ public class ChessBoard : MonoBehaviour
         
         // Update piece's internal position first
         piece.SetCurrentPosition(newPos);
-        
+
         // Calculate bounds once for use throughout animation
-        float maxBound = cellSize * 3; // cellSize * (4-1)
+        float maxBound = cellSize * (boardDimensions.x - 1);
         float minY = -1.4f;
-        float maxY = (3 * cellSize - 1.4f) + 1f; // +1f for animation arc
-        
+        float maxY = ((boardDimensions.y - 1) * cellSize - 1.4f) + 1f; // +1f for animation arc
+
         float elapsed = 0f;
-        
+
         while (elapsed < duration)
         {
             float t = elapsed / duration;
-            
+
             // Interpolate between start and end local positions
             Vector3 currentLocalPos = Vector3.Lerp(startLocalPos, endLocalPos, t);
-            
+
             // Add visual flair - slight upward arc during movement
             currentLocalPos.y += Mathf.Sin(t * Mathf.PI) * 0.5f;
-            
+
             // Bounds checking - ensure position stays within board bounds
             currentLocalPos.x = Mathf.Clamp(currentLocalPos.x, 0f, maxBound);
             currentLocalPos.z = Mathf.Clamp(currentLocalPos.z, 0f, maxBound);
             currentLocalPos.y = Mathf.Clamp(currentLocalPos.y, minY, maxY);
-            
+
             // Apply LOCAL position to piece (relative to board container)
             piece.transform.localPosition = currentLocalPos;
-            
+
             elapsed += Time.deltaTime;
             yield return null;
         }
-        
+
         // Ensure final position is exact using local coordinates
         piece.transform.localPosition = endLocalPos;
-        
+
         // Validate final position and recover if needed
         Vector3 finalPos = piece.transform.localPosition;
-        bool needsRecovery = finalPos.x < 0 || finalPos.x > maxBound || 
+        bool needsRecovery = finalPos.x < 0 || finalPos.x > maxBound ||
                            finalPos.z < 0 || finalPos.z > maxBound ||
-                           finalPos.y < -2.0f || finalPos.y > (3 * cellSize + 1.0f);
+                           finalPos.y < -2.0f || finalPos.y > ((boardDimensions.y - 1) * cellSize + 1.0f);
         
         if (needsRecovery)
         {
@@ -1514,46 +1533,47 @@ public class ChessBoard : MonoBehaviour
     private List<BoardPosition> GetFacePositions(CubeFace face)
     {
         List<BoardPosition> positions = new List<BoardPosition>();
-        
+        int maxCoord = boardDimensions.x - 1; // Assuming cubic board
+
         switch (face)
         {
             case CubeFace.Front: // Z = 0
-                for (int x = 0; x < 4; x++)
-                    for (int y = 0; y < 4; y++)
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int y = 0; y < boardDimensions.y; y++)
                         positions.Add(new BoardPosition(x, y, 0));
                 break;
-                
-            case CubeFace.Back: // Z = 3
-                for (int x = 0; x < 4; x++)
-                    for (int y = 0; y < 4; y++)
-                        positions.Add(new BoardPosition(x, y, 3));
+
+            case CubeFace.Back: // Z = max
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int y = 0; y < boardDimensions.y; y++)
+                        positions.Add(new BoardPosition(x, y, maxCoord));
                 break;
-                
+
             case CubeFace.Left: // X = 0
-                for (int y = 0; y < 4; y++)
-                    for (int z = 0; z < 4; z++)
+                for (int y = 0; y < boardDimensions.y; y++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                         positions.Add(new BoardPosition(0, y, z));
                 break;
-                
-            case CubeFace.Right: // X = 3
-                for (int y = 0; y < 4; y++)
-                    for (int z = 0; z < 4; z++)
-                        positions.Add(new BoardPosition(3, y, z));
+
+            case CubeFace.Right: // X = max
+                for (int y = 0; y < boardDimensions.y; y++)
+                    for (int z = 0; z < boardDimensions.z; z++)
+                        positions.Add(new BoardPosition(maxCoord, y, z));
                 break;
-                
-            case CubeFace.Top: // Y = 3
-                for (int x = 0; x < 4; x++)
-                    for (int z = 0; z < 4; z++)
-                        positions.Add(new BoardPosition(x, 3, z));
+
+            case CubeFace.Top: // Y = max
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int z = 0; z < boardDimensions.z; z++)
+                        positions.Add(new BoardPosition(x, maxCoord, z));
                 break;
-                
+
             case CubeFace.Bottom: // Y = 0
-                for (int x = 0; x < 4; x++)
-                    for (int z = 0; z < 4; z++)
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                         positions.Add(new BoardPosition(x, 0, z));
                 break;
         }
-        
+
         return positions;
     }
     
@@ -1563,28 +1583,28 @@ public class ChessBoard : MonoBehaviour
     private List<BoardPosition> GetLayerPositions(RotationAxis axis, int layer)
     {
         List<BoardPosition> positions = new List<BoardPosition>();
-        
+
         switch (axis)
         {
             case RotationAxis.X: // X = layer
-                for (int y = 0; y < 4; y++)
-                    for (int z = 0; z < 4; z++)
+                for (int y = 0; y < boardDimensions.y; y++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                         positions.Add(new BoardPosition(layer, y, z));
                 break;
-                
+
             case RotationAxis.Y: // Y = layer
-                for (int x = 0; x < 4; x++)
-                    for (int z = 0; z < 4; z++)
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                         positions.Add(new BoardPosition(x, layer, z));
                 break;
-                
+
             case RotationAxis.Z: // Z = layer
-                for (int x = 0; x < 4; x++)
-                    for (int y = 0; y < 4; y++)
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int y = 0; y < boardDimensions.y; y++)
                         positions.Add(new BoardPosition(x, y, layer));
                 break;
         }
-        
+
         return positions;
     }
     

@@ -247,7 +247,7 @@ public class MinimaxEngine
     {
         if (ChessBoard.Instance == null)
             return new List<AIMove>();
-        
+
         // PERFORMANCE OPTIMIZATION: Check cache first
         int currentBoardHash = GetBoardHash();
         if (currentBoardHash == lastBoardHash && movesCache.ContainsKey(player))
@@ -256,33 +256,38 @@ public class MinimaxEngine
                 Debug.Log($"MinimaxEngine: Using cached moves for {player} ({movesCache[player].Count} moves)");
             return new List<AIMove>(movesCache[player]); // Return copy to prevent modification
         }
-        
+
         // Cache miss - calculate moves
         List<AIMove> moves = new List<AIMove>();
-        
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
         // Scan all board positions for pieces of the given color
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition position = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(position);
-                    
+
                     if (piece != null && piece.pieceColor == player)
                     {
                         // PERFORMANCE: Use GetValidMoves instead of GetLegalMoves to skip expensive check validation
                         // Check validation will be done once at the top level, not for every minimax node
                         List<BoardPosition> validMoves = piece.GetValidMoves();
-                        
+
                         foreach (BoardPosition movePos in validMoves)
                         {
                             // PERFORMANCE: Skip moves that would capture own pieces (basic validation only)
                             ChessPiece targetPiece = ChessBoard.Instance.GetPieceAt(movePos);
                             if (targetPiece != null && targetPiece.pieceColor == player)
                                 continue; // Can't capture own piece
-                            
+
                             moves.Add(new AIMove
                             {
                                 piece = piece,
@@ -295,14 +300,14 @@ public class MinimaxEngine
                 }
             }
         }
-        
+
         // Update cache
         movesCache[player] = new List<AIMove>(moves);
         lastBoardHash = currentBoardHash;
-        
+
         if (enableDebugLogging)
             Debug.Log($"MinimaxEngine: Calculated {moves.Count} moves for {player} (cached for reuse)");
-        
+
         return moves;
     }
     
@@ -313,18 +318,25 @@ public class MinimaxEngine
     {
         if (ChessBoard.Instance == null)
             return 0;
-        
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
         int hash = 0;
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
                     if (piece != null)
                     {
-                        hash ^= ((int)piece.pieceType + 1) * (x * 16 + y * 4 + z + 1) * ((int)piece.pieceColor + 1);
+                        // Scalable hash calculation adjusted for dynamic board size
+                        int positionMultiplier = x * boardDimensions.y * boardDimensions.z + y * boardDimensions.z + z + 1;
+                        hash ^= ((int)piece.pieceType + 1) * positionMultiplier * ((int)piece.pieceColor + 1);
                     }
                 }
             }
@@ -433,15 +445,20 @@ public class MinimaxEngine
     private float CalculateMaterialScore(PieceColor player)
     {
         float materialScore = 0;
-        
-        for (int x = 0; x < 4; x++)
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
-                    
+
                     if (piece != null && piece.pieceColor == player)
                     {
                         materialScore += GetPieceValue(piece.pieceType);
@@ -449,7 +466,7 @@ public class MinimaxEngine
                 }
             }
         }
-        
+
         return materialScore;
     }
     
@@ -491,42 +508,55 @@ public class MinimaxEngine
     
     /// <summary>
     /// Calculate how well pieces control the center of the 3D board
-    /// In a 4x4x4 cube, center squares are more valuable
+    /// Center squares are more valuable regardless of board size
     /// </summary>
     private float CalculateCenterControl(PieceColor player)
     {
         float centerScore = 0;
-        
-        // Define center and near-center positions in 4x4x4 board
-        // True center would be between (1.5, 1.5, 1.5) - not possible on discrete grid
-        // So we value positions closer to center more highly
-        
-        for (int x = 0; x < 4; x++)
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        // Calculate center point dynamically (e.g., 1.5 for size 4, 2.5 for size 6, 3.5 for size 8)
+        float centerX = (boardDimensions.x - 1) / 2.0f;
+        float centerY = (boardDimensions.y - 1) / 2.0f;
+        float centerZ = (boardDimensions.z - 1) / 2.0f;
+
+        // Calculate max possible distance from center for normalization
+        float maxDistance = Mathf.Sqrt(
+            Mathf.Pow(centerX, 2) +
+            Mathf.Pow(centerY, 2) +
+            Mathf.Pow(centerZ, 2)
+        );
+
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
-                    
+
                     if (piece != null && piece.pieceColor == player)
                     {
-                        // Calculate distance from center (1.5, 1.5, 1.5)
+                        // Calculate distance from center
                         float distanceFromCenter = Mathf.Sqrt(
-                            Mathf.Pow(x - 1.5f, 2) + 
-                            Mathf.Pow(y - 1.5f, 2) + 
-                            Mathf.Pow(z - 1.5f, 2)
+                            Mathf.Pow(x - centerX, 2) +
+                            Mathf.Pow(y - centerY, 2) +
+                            Mathf.Pow(z - centerZ, 2)
                         );
-                        
-                        // Closer to center = higher score (inverse relationship)
-                        float centerValue = (3.0f - distanceFromCenter) * 0.1f;
+
+                        // Closer to center = higher score (inverse relationship, normalized by board size)
+                        float centerValue = (maxDistance - distanceFromCenter) * 0.1f;
                         centerScore += centerValue;
                     }
                 }
             }
         }
-        
+
         return centerScore;
     }
     
@@ -536,25 +566,30 @@ public class MinimaxEngine
     private float CalculatePieceCoordination(PieceColor player)
     {
         float coordinationScore = 0;
-        
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
         // Count how many friendly pieces each piece can "see" (attack squares)
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
-                    
+
                     if (piece != null && piece.pieceColor == player)
                     {
                         List<BoardPosition> attackSquares = piece.GetAttackSquares();
-                        
+
                         foreach (BoardPosition attackPos in attackSquares)
                         {
                             ChessPiece targetPiece = ChessBoard.Instance.GetPieceAt(attackPos);
-                            
+
                             // Bonus for defending friendly pieces
                             if (targetPiece != null && targetPiece.pieceColor == player)
                             {
@@ -565,7 +600,7 @@ public class MinimaxEngine
                 }
             }
         }
-        
+
         return coordinationScore;
     }
     
@@ -576,17 +611,23 @@ public class MinimaxEngine
     private float CalculateLayerControl(PieceColor player)
     {
         float layerScore = 0;
-        int[] piecesPerLayer = new int[4]; // Count pieces on each Y level
-        
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        int[] piecesPerLayer = new int[boardDimensions.y]; // Count pieces on each Y level (dynamically sized)
+
         // Count pieces on each layer
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
-                    
+
                     if (piece != null && piece.pieceColor == player)
                     {
                         piecesPerLayer[y]++;
@@ -594,16 +635,16 @@ public class MinimaxEngine
                 }
             }
         }
-        
+
         // Bonus for having pieces on multiple layers (diversity)
         int layersOccupied = 0;
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < boardDimensions.y; i++)
         {
             if (piecesPerLayer[i] > 0) layersOccupied++;
         }
-        
+
         layerScore += layersOccupied * 0.2f; // Bonus for layer diversity
-        
+
         return layerScore;
     }
     
@@ -680,14 +721,19 @@ public class MinimaxEngine
     /// </summary>
     private ChessPiece FindKing(PieceColor color)
     {
-        for (int x = 0; x < 4; x++)
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
-                    
+
                     if (piece != null && piece.pieceColor == color && piece.pieceType == ChessPieceType.King)
                     {
                         return piece;
@@ -695,7 +741,7 @@ public class MinimaxEngine
                 }
             }
         }
-        
+
         return null; // King not found (should not happen in normal game)
     }
     
@@ -781,22 +827,27 @@ public class MinimaxEngine
     private string GeneratePositionHashForPlayer(PieceColor player)
     {
         if (ChessBoard.Instance == null) return "empty";
-        
+
         System.Text.StringBuilder hashBuilder = new System.Text.StringBuilder();
-        
+
         // Include player to move in hash
         hashBuilder.Append(player == PieceColor.White ? "W:" : "B:");
-        
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
         // Generate hash based on piece positions (same as TurnManager)
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
-                    
+
                     if (piece != null)
                     {
                         // Format: position|color|type
@@ -805,7 +856,7 @@ public class MinimaxEngine
                 }
             }
         }
-        
+
         return hashBuilder.ToString();
     }
     
@@ -816,28 +867,33 @@ public class MinimaxEngine
     private AIMove FindBestLegalMove(PieceColor player)
     {
         Debug.Log($"🔧 FindBestLegalMove: Searching all pieces for {player} to find any legal move...");
-        
+
         if (ChessBoard.Instance == null) return null;
-        
+
         List<AIMove> allLegalMoves = new List<AIMove>();
-        
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
         // Scan all positions for pieces of the given color
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition position = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(position);
-                    
+
                     if (piece != null && piece.pieceColor == player)
                     {
                         // Use GetLegalMoves() to ensure moves are truly legal
                         List<BoardPosition> legalMoves = piece.GetLegalMoves();
-                        
+
                         Debug.Log($"🔧 FindBestLegalMove: {piece.pieceType} at {position} has {legalMoves.Count} legal moves");
-                        
+
                         foreach (BoardPosition movePos in legalMoves)
                         {
                             // Create AIMove for each legal move
@@ -848,22 +904,22 @@ public class MinimaxEngine
                                 toPosition = movePos,
                                 evaluationScore = EvaluateMoveQuickly(piece, position, movePos, player)
                             };
-                            
+
                             allLegalMoves.Add(legalMove);
                         }
                     }
                 }
             }
         }
-        
+
         Debug.Log($"🔧 FindBestLegalMove: Found {allLegalMoves.Count} total legal moves for {player}");
-        
+
         if (allLegalMoves.Count == 0)
         {
             Debug.LogError($"🔧 FindBestLegalMove: NO LEGAL MOVES FOUND for {player} - this indicates stalemate or checkmate");
             return null;
         }
-        
+
         // Find the best move from all legal moves
         AIMove bestLegalMove = allLegalMoves[0];
         foreach (AIMove move in allLegalMoves)
@@ -873,9 +929,9 @@ public class MinimaxEngine
                 bestLegalMove = move;
             }
         }
-        
+
         Debug.Log($"🔧 FindBestLegalMove: Best legal move is {bestLegalMove.piece.pieceType} {bestLegalMove.fromPosition}→{bestLegalMove.toPosition} (score: {bestLegalMove.evaluationScore:F2})");
-        
+
         return bestLegalMove;
     }
     
@@ -987,18 +1043,23 @@ public class MinimaxEngine
             piecesCacheHits++;
             return evalPieceCache[player];
         }
-        
+
         List<ChessPiece> pieces = new List<ChessPiece>(16); // Pre-allocate for typical piece count
-        
-        // OPTIMIZED: Only scan occupied positions instead of all 64 squares
+
+        // OPTIMIZED: Only scan occupied positions instead of all squares
         // Early exit if ChessBoard is null
         if (ChessBoard.Instance == null) return pieces;
-        
-        for (int x = 0; x < 4; x++)
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
                     if (piece != null && piece.pieceColor == player)
@@ -1008,13 +1069,13 @@ public class MinimaxEngine
                 }
             }
         }
-        
+
         // PERFORMANCE FIX: Cache result for reuse within same evaluation
         if (evalPieceCache != null)
         {
             evalPieceCache[player] = pieces;
         }
-        
+
         return pieces;
     }
     
@@ -1155,20 +1216,25 @@ public class MinimaxEngine
     private bool IsPieceDefended(ChessPiece piece)
     {
         if (piece == null) return false;
-        
+
         BoardPosition piecePos = piece.CurrentPosition;
         PieceColor pieceColor = piece.pieceColor;
-        
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
         // Check if any friendly piece can attack this position
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     ChessPiece defender = ChessBoard.Instance.GetPieceAt(pos);
-                    
+
                     if (defender != null && defender.pieceColor == pieceColor && defender != piece)
                     {
                         List<BoardPosition> attackSquares = defender.GetAttackSquares();
@@ -1180,7 +1246,7 @@ public class MinimaxEngine
                 }
             }
         }
-        
+
         return false;
     }
     
@@ -1189,16 +1255,23 @@ public class MinimaxEngine
     /// </summary>
     private bool IsInOpponentTerritory(BoardPosition pos, PieceColor player)
     {
-        // In a 4x4x4 board, consider opponent territory based on Y levels
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        // Consider opponent territory based on Y levels (upper half vs lower half of board)
+        int midpoint = boardDimensions.y / 2;
+
         if (player == PieceColor.White)
         {
-            // White advancing to upper levels (Y > 2) is aggressive
-            return pos.y >= 2;
+            // White advancing to upper levels (Y >= midpoint) is aggressive
+            return pos.y >= midpoint;
         }
         else
         {
-            // Black advancing to lower levels (Y < 2) is aggressive  
-            return pos.y <= 1;
+            // Black advancing to lower levels (Y < midpoint) is aggressive
+            return pos.y < midpoint;
         }
     }
     
@@ -1330,12 +1403,17 @@ public class MinimaxEngine
     {
         int totalPieces = 0;
         float totalMaterial = 0;
-        
-        for (int x = 0; x < 4; x++)
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
                     if (piece != null)
@@ -1346,11 +1424,18 @@ public class MinimaxEngine
                 }
             }
         }
-        
-        // Phase determination for 3D chess (starting with ~32 pieces)
-        if (totalPieces <= 8 || totalMaterial <= 20)
+
+        // Phase determination for 3D chess (scales with board size)
+        // 4x4x4 starts with ~32 pieces, 6x6x6 with ~72, 8x8x8 with ~128
+        int totalSquares = boardDimensions.x * boardDimensions.y * boardDimensions.z;
+        int estimatedStartingPieces = totalSquares / 2; // Rough estimate
+
+        // Endgame: Less than 25% of starting pieces
+        // Middlegame: 25-50% of starting pieces
+        // Opening: More than 50% of starting pieces
+        if (totalPieces <= estimatedStartingPieces / 4 || totalMaterial <= 20)
             return GamePhase.Endgame;
-        else if (totalPieces <= 16 || totalMaterial <= 40)
+        else if (totalPieces <= estimatedStartingPieces / 2 || totalMaterial <= 40)
             return GamePhase.Middlegame;
         else
             return GamePhase.Opening;
@@ -1386,12 +1471,17 @@ public class MinimaxEngine
     private bool HasInsufficientMaterial(PieceColor player)
     {
         List<ChessPieceType> pieces = new List<ChessPieceType>();
-        
-        for (int x = 0; x < 4; x++)
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
                     if (piece != null && piece.pieceColor == player && piece.pieceType != ChessPieceType.King)
@@ -1401,7 +1491,7 @@ public class MinimaxEngine
                 }
             }
         }
-        
+
         // Insufficient material cases for 3D chess
         if (pieces.Count == 0) return true; // King only
         if (pieces.Count == 1)
@@ -1414,7 +1504,7 @@ public class MinimaxEngine
             // Two knights or two bishops may be insufficient depending on position
             return pieces.TrueForAll(p => p == ChessPieceType.Knight || p == ChessPieceType.Bishop);
         }
-        
+
         return false; // Assume sufficient material otherwise
     }
     

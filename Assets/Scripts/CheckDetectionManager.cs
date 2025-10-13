@@ -132,11 +132,30 @@ public class CheckDetectionManager : MonoBehaviour
             Debug.LogWarning($"CheckDetectionManager.IsKingInCheck: No {kingColor} king found on board, returning false");
             return false;
         }
-        
+
         // Check if any enemy piece is attacking the king's position
-        PieceColor enemyColor = (kingColor == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-        
-        bool inCheck = IsPositionUnderAttack(kingPosition, enemyColor);
+        // For multi-player games, check threats from ALL opponents
+        bool inCheck = false;
+
+        if (PlayerManager.Instance != null)
+        {
+            // Multi-player: Check each opponent
+            List<PieceColor> opponents = PlayerManager.Instance.GetOpponents(kingColor);
+            foreach (PieceColor opponentColor in opponents)
+            {
+                if (IsPositionUnderAttack(kingPosition, opponentColor))
+                {
+                    inCheck = true;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            // Fallback for 2-player games
+            PieceColor enemyColor = (kingColor == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+            inCheck = IsPositionUnderAttack(kingPosition, enemyColor);
+        }
         
         // Update cache
         _checkStateCache[kingColor] = inCheck;
@@ -157,13 +176,18 @@ public class CheckDetectionManager : MonoBehaviour
         {
             return false;
         }
-        
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
         // Check all pieces of the attacking color
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition piecePos = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(piecePos);
@@ -203,17 +227,22 @@ public class CheckDetectionManager : MonoBehaviour
         {
             return threatenedSquares;
         }
-        
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
         // Check all pieces of the attacking color
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition piecePos = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(piecePos);
-                    
+
                     // ANTI-CORRUPTION: Validate piece before using for threat detection
                     if (piece != null && piece.pieceColor == attackingColor && IsValidPieceForCheckDetection(piece, piecePos))
                     {
@@ -247,21 +276,26 @@ public class CheckDetectionManager : MonoBehaviour
             return attackingPieces;
         }
         
-        // Find what color king is at this position to determine enemy color
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        // Find what color king is at this position to determine enemy color(s)
         ChessPiece kingAtPosition = ChessBoard.Instance.GetPieceAt(position);
         if (kingAtPosition == null || kingAtPosition.pieceType != ChessPieceType.King)
         {
             // If no king at position, check for attacks from all colors
             // This shouldn't happen in normal check detection but handles edge cases
-            for (int x = 0; x < 4; x++)
+            for (int x = 0; x < boardDimensions.x; x++)
             {
-                for (int y = 0; y < 4; y++)
+                for (int y = 0; y < boardDimensions.y; y++)
                 {
-                    for (int z = 0; z < 4; z++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                     {
                         BoardPosition piecePos = new BoardPosition(x, y, z);
                         ChessPiece piece = ChessBoard.Instance.GetPieceAt(piecePos);
-                        
+
                         if (piece != null && IsValidPieceForCheckDetection(piece, piecePos))
                         {
                             List<BoardPosition> attackSquares = GetPieceAttackSquares(piece);
@@ -276,22 +310,34 @@ public class CheckDetectionManager : MonoBehaviour
         }
         else
         {
-            // King found at position - only check enemy pieces
+            // King found at position - check all opponent pieces
             PieceColor kingColor = kingAtPosition.pieceColor;
-            PieceColor enemyColor = (kingColor == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-            
-            for (int x = 0; x < 4; x++)
+
+            // Get all opponents of this king
+            List<PieceColor> opponentColors = new List<PieceColor>();
+            if (PlayerManager.Instance != null)
             {
-                for (int y = 0; y < 4; y++)
+                opponentColors = PlayerManager.Instance.GetOpponents(kingColor);
+            }
+            else
+            {
+                // Fallback for 2-player games
+                PieceColor enemyColor = (kingColor == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+                opponentColors.Add(enemyColor);
+            }
+
+            for (int x = 0; x < boardDimensions.x; x++)
+            {
+                for (int y = 0; y < boardDimensions.y; y++)
                 {
-                    for (int z = 0; z < 4; z++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                     {
                         BoardPosition piecePos = new BoardPosition(x, y, z);
                         ChessPiece piece = ChessBoard.Instance.GetPieceAt(piecePos);
-                        
-                        // FIXED: Only check pieces of enemy color (same logic as IsPositionUnderAttack)
+
+                        // Check pieces of opponent colors only
                         // ANTI-CORRUPTION: Validate piece before using for check detection
-                        if (piece != null && piece.pieceColor == enemyColor && IsValidPieceForCheckDetection(piece, piecePos))
+                        if (piece != null && opponentColors.Contains(piece.pieceColor) && IsValidPieceForCheckDetection(piece, piecePos))
                         {
                             List<BoardPosition> attackSquares = GetPieceAttackSquares(piece);
                             if (attackSquares.Contains(position))
@@ -357,9 +403,26 @@ public class CheckDetectionManager : MonoBehaviour
         {
             return true;
         }
-        
-        PieceColor enemyColor = (kingColor == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-        return !IsPositionUnderAttack(position, enemyColor);
+
+        // For multi-player games, position is safe only if NOT under attack by ANY opponent
+        if (PlayerManager.Instance != null)
+        {
+            List<PieceColor> opponents = PlayerManager.Instance.GetOpponents(kingColor);
+            foreach (PieceColor opponentColor in opponents)
+            {
+                if (IsPositionUnderAttack(position, opponentColor))
+                {
+                    return false; // Under attack by at least one opponent
+                }
+            }
+            return true; // Not under attack by any opponent
+        }
+        else
+        {
+            // Fallback for 2-player games
+            PieceColor enemyColor = (kingColor == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+            return !IsPositionUnderAttack(position, enemyColor);
+        }
     }
     
     /// <summary>
@@ -453,13 +516,18 @@ public class CheckDetectionManager : MonoBehaviour
         // Additional validation for Kings/Queens (most critical pieces)
         if (piece.pieceType == ChessPieceType.King || piece.pieceType == ChessPieceType.Queen)
         {
+            // Get dynamic board dimensions from BoardDimensionsManager
+            Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+                ? BoardDimensionsManager.Instance.GetDimensions()
+                : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
             // Cross-reference: ensure this piece isn't registered at multiple positions
             int registrationCount = 0;
-            for (int x = 0; x < 4; x++)
+            for (int x = 0; x < boardDimensions.x; x++)
             {
-                for (int y = 0; y < 4; y++)
+                for (int y = 0; y < boardDimensions.y; y++)
                 {
-                    for (int z = 0; z < 4; z++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                     {
                         if (ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z)) == piece)
                         {
@@ -468,7 +536,7 @@ public class CheckDetectionManager : MonoBehaviour
                     }
                 }
             }
-            
+
             if (registrationCount > 1)
             {
                 Debug.LogError($"🚨 DUPLICATE PIECE FILTERED: {piece.pieceColor} {piece.pieceType} registered at {registrationCount} positions - EXCLUDED from check detection");
@@ -492,17 +560,21 @@ public class CheckDetectionManager : MonoBehaviour
             Debug.LogError($"CheckDetectionManager.FindKingPosition: ChessBoard.Instance is NULL");
             return new BoardPosition(-1, -1, -1);
         }
-        
-        
-        for (int x = 0; x < 4; x++)
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
-                    
+
                     if (piece != null)
                     {
                         if (piece.pieceType == ChessPieceType.King && piece.pieceColor == kingColor)
@@ -513,7 +585,7 @@ public class CheckDetectionManager : MonoBehaviour
                 }
             }
         }
-        
+
         Debug.LogError($"CheckDetectionManager.FindKingPosition: Could not find {kingColor} king on the board!");
         return new BoardPosition(-1, -1, -1); // Invalid position
     }

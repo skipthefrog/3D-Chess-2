@@ -4,7 +4,11 @@ using UnityEngine;
 public enum PieceColor
 {
     White,
-    Black
+    Black,
+    Green,    // 4-player (6x6x6 or 8x8x8 boards)
+    Purple,   // 4-player (6x6x6 or 8x8x8 boards)
+    Yellow,   // 6-player (8x8x8 board only)
+    Orange    // 6-player (8x8x8 board only)
 }
 
 public enum PlayerType

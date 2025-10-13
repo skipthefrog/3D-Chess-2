@@ -978,7 +978,18 @@ public class PlacementManager : MonoBehaviour
         // Remove piece from tray only if it's not a repositioning piece
         if (!isRepositioningPiece)
         {
-            PieceTray tray = (piece.pieceColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+            // Use PieceTrayManager for scalable tray access
+            PieceTray tray = null;
+            if (PieceTrayManager.Instance != null)
+            {
+                tray = PieceTrayManager.Instance.GetTray(piece.pieceColor);
+            }
+            else
+            {
+                // Fallback for 2-player games
+                tray = (piece.pieceColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+            }
+
             if (tray != null)
             {
                 tray.RemovePiece(piece);
@@ -1426,8 +1437,18 @@ public class PlacementManager : MonoBehaviour
             // Reset piece state
             piece.ResetPosition(); // This should invalidate CurrentPosition
             
-            // Add back to appropriate tray
-            PieceTray tray = (piece.pieceColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+            // Add back to appropriate tray using PieceTrayManager for scalability
+            PieceTray tray = null;
+            if (PieceTrayManager.Instance != null)
+            {
+                tray = PieceTrayManager.Instance.GetTray(piece.pieceColor);
+            }
+            else
+            {
+                // Fallback for 2-player games
+                tray = (piece.pieceColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+            }
+
             if (tray != null)
             {
                 bool success = tray.AddPiece(piece);

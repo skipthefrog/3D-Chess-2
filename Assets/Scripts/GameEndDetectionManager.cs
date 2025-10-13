@@ -194,29 +194,34 @@ public class GameEndDetectionManager : MonoBehaviour
         {
             return true; // Assume player has moves if detection is disabled
         }
-        
+
         int totalLegalMoves = 0;
-        
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
         // Check all pieces of the specified color
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
-                    
+
                     if (piece != null && piece.pieceColor == player)
                     {
                         List<BoardPosition> legalMoves = piece.GetLegalMoves();
                         totalLegalMoves += legalMoves.Count;
-                        
+
                         if (debugMode)
                         {
                             Debug.Log($"GameEndDetectionManager: {player} {piece.pieceType} at {pos} has {legalMoves.Count} legal moves");
                         }
-                        
+
                         // Early exit if we find any legal move
                         if (legalMoves.Count > 0)
                         {
@@ -230,12 +235,12 @@ public class GameEndDetectionManager : MonoBehaviour
                 }
             }
         }
-        
+
         if (debugMode)
         {
             Debug.Log($"GameEndDetectionManager: {player} has NO legal moves (total: {totalLegalMoves})");
         }
-        
+
         return false;
     }
     
@@ -440,18 +445,23 @@ public class GameEndDetectionManager : MonoBehaviour
         {
             return -1; // Invalid count
         }
-        
+
         int totalMoves = 0;
-        
-        for (int x = 0; x < 4; x++)
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
-                    
+
                     if (piece != null && piece.pieceColor == player)
                     {
                         totalMoves += piece.GetLegalMoves().Count;
@@ -459,7 +469,7 @@ public class GameEndDetectionManager : MonoBehaviour
                 }
             }
         }
-        
+
         return totalMoves;
     }
     
