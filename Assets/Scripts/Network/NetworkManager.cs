@@ -1,0 +1,1419 @@
+// Try to import Socket.IO packages and detect which one is available
+#if UNITY_EDITOR || !UNITY_WEBGL
+    // For desktop/editor builds, try to use Socket.IO Unity
+    #if SOCKETIO_UNITY_AVAILABLE
+        #define USE_SOCKETIO_UNITY
+    #elif BESTHTTP_AVAILABLE
+        #define USE_BESTHTTP_SOCKETIO
+    #else
+        // No Socket.IO package detected, use simulation mode
+        #define USE_SIMULATION_MODE
+    #endif
+#else
+    // For WebGL builds, we need WebGL-compatible networking
+    #define USE_WEBGL_SOCKETS
+#endif
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using UnityEngine;
+using ChessNetwork;
+
+#if USE_SOCKETIO_UNITY
+    using SocketIOUnity;
+#elif USE_BESTHTTP_SOCKETIO
+    using BestHTTP.SocketIO;
+#endif
+
+/// <summary>
+/// Manages network communication for online multiplayer chess games.
+/// Handles server connection, room management, and game state synchronization.
+/// </summary>
+public class NetworkManager : MonoBehaviour
+{
+    [Header("Server Configuration")]
+    [SerializeField] private string serverUrl = "http://localhost:3000";
+    [SerializeField] private bool useProductionUrl = true;
+    [SerializeField] private string productionUrl = "https://928fb741c6db.ngrok-free.app"; // Current ngrok tunnel
+    [SerializeField] private bool autoConnect = false;
+    [SerializeField] private float connectionTimeout = 10f;
+    [SerializeField] private float reconnectDelay = 5f;
+    
+    [Header("Debug Settings")]
+    [SerializeField] private bool enableDebugLogging = true;
+    [SerializeField] private bool logAllMessages = false;
+    
+    // Singleton instance
+    public static NetworkManager Instance { get; private set; }
+    
+    // Connection state
+    public bool IsConnected { get; private set; } = false;
+    public bool IsHost { get; private set; } = false;
+    public string RoomCode { get; private set; } = "";
+    public string PlayerName { get; private set; } = "";
+    public PieceColor AssignedColor { get; private set; } = PieceColor.White;
+    public ConnectionStatus CurrentConnectionStatus { get; private set; }
+    
+    // Socket connection (will be initialized based on available package)
+#if USE_SOCKETIO_UNITY
+    private SocketIOUnity socket;
+#elif USE_BESTHTTP_SOCKETIO
+    private SocketManager socket;
+#elif USE_WEBGL_SOCKETS
+    // WebGL socket implementation placeholder
+    private object socket;
+#else
+    // Simulation mode - no real socket
+    private object socket;
+#endif
+    
+    // Package detection
+    private bool hasSocketIOPackage = false;
+    private string detectedPackage = "None";
+    
+    // Game state
+    private NetworkGameState lastGameState;
+    private Dictionary<string, NetworkPlayerInfo> connectedPlayers = new Dictionary<string, NetworkPlayerInfo>();
+    private Queue<NetworkMoveData> pendingMoves = new Queue<NetworkMoveData>();
+    
+    // Timing and reconnection
+    private float lastPingTime;
+    private float lastHeartbeat;
+    private bool isReconnecting = false;
+    private int reconnectAttempts = 0;
+    private const int maxReconnectAttempts = 5;
+    
+    #region Events
+    
+    // Connection events
+    public System.Action<bool> OnConnectionStateChanged;
+    public System.Action<ConnectionStatus> OnConnectionStatusUpdated;
+    public System.Action<string> OnConnectionError;
+    
+    // Room events  
+    public System.Action<string, PieceColor> OnRoomCreated;
+    public System.Action<string, PieceColor> OnRoomJoined;
+    public System.Action<string> OnRoomError;
+    public System.Action<NetworkPlayerInfo> OnPlayerJoined;
+    public System.Action<NetworkPlayerInfo> OnPlayerLeft;
+    
+    // Matchmaking events
+    public System.Action<string, PieceColor> OnMatchFound;
+    public System.Action<string> OnMatchmakingProgress;
+    public System.Action OnMatchmakingTimeout;
+    
+    // Game events
+    public System.Action<NetworkGameState> OnGameStateUpdated;
+    public System.Action<NetworkMoveData> OnMoveReceived;
+    public System.Action OnGameStarted;
+    public System.Action<string> OnGameEnded;
+    public System.Action<NetworkErrorMessage> OnGameError;
+    
+    #endregion
+    
+    #region Public Methods
+    
+    /// <summary>
+    /// Set the assigned color for this player
+    /// </summary>
+    public void SetAssignedColor(PieceColor color)
+    {
+        AssignedColor = color;
+        if (enableDebugLogging)
+            Debug.Log($"🎨 NetworkManager: AssignedColor set to {color}");
+    }
+    
+    #endregion
+    
+    #region Unity Lifecycle
+    
+    private void Awake()
+    {
+        // Singleton pattern
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+            InitializeNetworking();
+            
+            if (enableDebugLogging)
+                Debug.Log("🌐 NetworkManager: Instance created and initialized");
+        }
+        else if (Instance != this)
+        {
+            Debug.LogWarning("🌐 NetworkManager: Duplicate instance detected, destroying...");
+            Destroy(gameObject);
+        }
+    }
+    
+    private void Start()
+    {
+        if (autoConnect && !IsConnected)
+        {
+            ConnectToServer();
+        }
+    }
+    
+    private void Update()
+    {
+        // Handle periodic tasks
+        HandleHeartbeat();
+        HandleReconnection();
+        ProcessPendingMoves();
+    }
+    
+    private void OnDestroy()
+    {
+        DisconnectFromServer();
+    }
+    
+    #endregion
+    
+    #region Initialization
+    
+    private void InitializeNetworking()
+    {
+        // Determine the actual server URL to use
+        string actualServerUrl = DetermineServerUrl();
+        
+        CurrentConnectionStatus = new ConnectionStatus
+        {
+            isConnected = false,
+            serverUrl = actualServerUrl,
+            status = "disconnected"
+        };
+        
+        // Detect available Socket.IO package
+        DetectSocketIOPackage();
+        
+        // Initialize socket based on detected package
+        InitializeSocket();
+        
+        if (enableDebugLogging)
+        {
+            Debug.Log($"🌐 NetworkManager: Networking initialized for {actualServerUrl}");
+            Debug.Log($"🔍 Detected package: {detectedPackage}");
+            Debug.Log($"📦 Socket.IO available: {hasSocketIOPackage}");
+        }
+    }
+    
+    /// <summary>
+    /// Determine which server URL to use based on configuration
+    /// </summary>
+    private string DetermineServerUrl()
+    {
+        if (useProductionUrl && !string.IsNullOrEmpty(productionUrl))
+        {
+            if (enableDebugLogging)
+                Debug.Log($"🌐 Using production URL: {productionUrl}");
+            return productionUrl;
+        }
+        
+        // Try to auto-detect ngrok tunnel or use localhost
+        string detectedUrl = TryDetectNgrokUrl();
+        if (!string.IsNullOrEmpty(detectedUrl))
+        {
+            if (enableDebugLogging)
+                Debug.Log($"🌐 Auto-detected ngrok URL: {detectedUrl}");
+            return detectedUrl;
+        }
+        
+        if (enableDebugLogging)
+            Debug.Log($"🌐 Using default localhost URL: {serverUrl}");
+        return serverUrl;
+    }
+    
+    /// <summary>
+    /// Try to detect if ngrok tunnel is being used (basic heuristic)
+    /// </summary>
+    private string TryDetectNgrokUrl()
+    {
+        // In a real implementation, you might check environment variables or config files
+        // For now, we'll provide a way to manually set the production URL
+        
+        // Check if there's a server config file that might contain the ngrok URL
+        try
+        {
+            string configPath = Path.Combine(Application.persistentDataPath, "server_config.txt");
+            if (File.Exists(configPath))
+            {
+                string configUrl = File.ReadAllText(configPath).Trim();
+                if (!string.IsNullOrEmpty(configUrl) && (configUrl.Contains("ngrok") || configUrl.StartsWith("http")))
+                {
+                    return configUrl;
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            if (enableDebugLogging)
+                Debug.LogWarning($"⚠️ Error reading server config: {e.Message}");
+        }
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Detect which Socket.IO package is available
+    /// </summary>
+    private void DetectSocketIOPackage()
+    {
+        try
+        {
+            if (enableDebugLogging)
+                Debug.Log("🔍 Starting Socket.IO package detection...");
+            
+            // Check for SocketIOUnityAssembly specifically
+            var assemblies = System.AppDomain.CurrentDomain.GetAssemblies();
+            foreach (var assembly in assemblies)
+            {
+                if (enableDebugLogging)
+                    Debug.Log($"🔍 Found assembly: {assembly.GetName().Name}");
+                
+                if (assembly.GetName().Name == "SocketIOUnityAssembly")
+                {
+                    hasSocketIOPackage = true;
+                    detectedPackage = "SocketIOUnityAssembly";
+                    if (enableDebugLogging)
+                        Debug.Log("✅ SocketIOUnityAssembly detected!");
+                    return;
+                }
+            }
+            
+            // Try to detect SocketIOUnity package
+            var socketIOUnityType = System.Type.GetType("SocketIOUnity.SocketIOUnity, SocketIOUnity");
+            if (socketIOUnityType != null)
+            {
+                hasSocketIOPackage = true;
+                detectedPackage = "SocketIOUnity";
+                if (enableDebugLogging)
+                    Debug.Log("✅ SocketIOUnity package detected");
+                return;
+            }
+            
+            // Try alternate SocketIOUnity assembly reference
+            var socketIOUnityType2 = System.Type.GetType("SocketIOUnity.SocketIOUnity, SocketIOUnityAssembly");
+            if (socketIOUnityType2 != null)
+            {
+                hasSocketIOPackage = true;
+                detectedPackage = "SocketIOUnityAssembly";
+                if (enableDebugLogging)
+                    Debug.Log("✅ SocketIOUnity package detected via SocketIOUnityAssembly");
+                return;
+            }
+            
+            // Try to detect SocketIOComponent
+            var socketIOComponentType = System.Type.GetType("SocketIOUnity.SocketIOComponent");
+            if (socketIOComponentType != null)
+            {
+                hasSocketIOPackage = true;
+                detectedPackage = "SocketIOUnity.Component";
+                if (enableDebugLogging)
+                    Debug.Log("✅ SocketIOComponent package detected");
+                return;
+            }
+            
+            // Try to detect BestHTTP Socket.IO
+            var bestHTTPType = System.Type.GetType("BestHTTP.SocketIO.SocketManager");
+            if (bestHTTPType != null)
+            {
+                hasSocketIOPackage = true;
+                detectedPackage = "BestHTTP";
+                if (enableDebugLogging)
+                    Debug.Log("✅ BestHTTP Socket.IO detected");
+                return;
+            }
+            
+            // Try to detect other common Socket.IO packages
+            var socketClientType = System.Type.GetType("SocketIOClient.SocketIO");
+            if (socketClientType != null)
+            {
+                hasSocketIOPackage = true;
+                detectedPackage = "SocketIOClient";
+                if (enableDebugLogging)
+                    Debug.Log("✅ SocketIOClient package detected");
+                return;
+            }
+            
+            // No Socket.IO package found
+            hasSocketIOPackage = false;
+            detectedPackage = "None (Simulation Mode)";
+            
+            if (enableDebugLogging)
+                Debug.LogWarning("⚠️ No Socket.IO package detected - using simulation mode");
+                
+        }
+        catch (Exception e)
+        {
+            hasSocketIOPackage = false;
+            detectedPackage = $"Error: {e.Message}";
+            Debug.LogError($"❌ Error detecting Socket.IO package: {e.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Initialize socket connection based on detected package
+    /// </summary>
+    private void InitializeSocket()
+    {
+        if (!hasSocketIOPackage)
+        {
+            if (enableDebugLogging)
+                Debug.Log("🔄 Initializing simulation mode (no Socket.IO package)");
+            return;
+        }
+        
+        try
+        {
+            // Initialize based on detected package
+#if USE_SOCKETIO_UNITY
+            InitializeSocketIOUnity();
+#elif USE_BESTHTTP_SOCKETIO
+            InitializeBestHTTP();
+#else
+            if (enableDebugLogging)
+                Debug.Log("🔄 Socket.IO package detected but not configured in preprocessor directives");
+#endif
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"❌ Error initializing socket: {e.Message}");
+            hasSocketIOPackage = false; // Fall back to simulation
+        }
+    }
+    
+#if USE_SOCKETIO_UNITY
+    private void InitializeSocketIOUnity()
+    {
+        if (enableDebugLogging)
+            Debug.Log("🔧 Initializing SocketIOUnity...");
+            
+        // This will be implemented when SocketIOUnity is properly configured
+        // For now, just log that we reached this point
+        Debug.Log("✅ SocketIOUnity initialization placeholder");
+    }
+#endif
+    
+#if USE_BESTHTTP_SOCKETIO
+    private void InitializeBestHTTP()
+    {
+        if (enableDebugLogging)
+            Debug.Log("🔧 Initializing BestHTTP Socket.IO...");
+            
+        // This will be implemented when BestHTTP is available
+        Debug.Log("✅ BestHTTP Socket.IO initialization placeholder");
+    }
+#endif
+    
+    #endregion
+    
+    #region Connection Management
+    
+    /// <summary>
+    /// Connect to the game server
+    /// </summary>
+    public void ConnectToServer()
+    {
+        if (IsConnected)
+        {
+            if (enableDebugLogging)
+                Debug.LogWarning("🌐 NetworkManager: Already connected to server");
+            return;
+        }
+        
+        // Get the current server URL (may have been updated)
+        string currentServerUrl = DetermineServerUrl();
+        CurrentConnectionStatus.serverUrl = currentServerUrl;
+        
+        if (enableDebugLogging)
+            Debug.Log($"🌐 NetworkManager: Connecting to server at {currentServerUrl}");
+        
+        UpdateConnectionStatus("connecting");
+        
+        if (hasSocketIOPackage)
+        {
+            // Attempt real Socket.IO connection
+            ConnectToSocketIOServer();
+        }
+        else
+        {
+            // Fall back to simulation mode
+            if (enableDebugLogging)
+                Debug.LogWarning("🔄 No Socket.IO package detected - using simulation mode");
+            StartCoroutine(SimulateConnection());
+        }
+    }
+    
+    /// <summary>
+    /// Disconnect from the game server
+    /// </summary>
+    public void DisconnectFromServer()
+    {
+        if (!IsConnected) return;
+        
+        if (enableDebugLogging)
+            Debug.Log("🌐 NetworkManager: Disconnecting from server");
+        
+        // TODO: Implement actual socket disconnection
+        
+        IsConnected = false;
+        IsHost = false;
+        RoomCode = "";
+        UpdateConnectionStatus("disconnected");
+        
+        OnConnectionStateChanged?.Invoke(false);
+    }
+    
+    /// <summary>
+    /// Connect to Socket.IO server if package is available
+    /// </summary>
+    private void ConnectToSocketIOServer()
+    {
+        try
+        {
+            if (enableDebugLogging)
+                Debug.Log("🔌 Attempting real Socket.IO connection...");
+            
+            // For now, create a test GameObject with SocketIOComponent if available
+            var socketIOComponentType = System.Type.GetType("SocketIOUnity.SocketIOComponent");
+            if (socketIOComponentType != null)
+            {
+                // Create a test connection using SocketIOComponent
+                GameObject socketIOObj = new GameObject("SocketIOConnection");
+                var socketComponent = socketIOObj.AddComponent(socketIOComponentType);
+                
+                if (socketComponent != null)
+                {
+                    if (enableDebugLogging)
+                        Debug.Log("✅ SocketIOComponent created successfully!");
+                    
+                    // Configure the socket connection with current server URL
+                    string currentServerUrl = CurrentConnectionStatus.serverUrl;
+                    var urlField = socketIOComponentType.GetField("url");
+                    if (urlField != null)
+                    {
+                        urlField.SetValue(socketComponent, currentServerUrl);
+                        if (enableDebugLogging)
+                            Debug.Log($"🔌 Socket URL set to: {currentServerUrl}");
+                    }
+                    
+                    var autoConnectField = socketIOComponentType.GetField("autoConnect");
+                    if (autoConnectField != null)
+                    {
+                        autoConnectField.SetValue(socketComponent, true);
+                        if (enableDebugLogging)
+                            Debug.Log("🔌 AutoConnect enabled");
+                    }
+                    
+                    // Set additional Socket.IO options if available
+                    SetSocketIOOptions(socketComponent, socketIOComponentType);
+                    
+                    // Store the component reference
+                    socket = socketComponent;
+                    
+                    if (enableDebugLogging)
+                        Debug.Log("🔌 Socket.IO connection configured and initiated");
+                        
+                    // Start checking connection status
+                    StartCoroutine(CheckSocketIOConnection());
+                }
+                else
+                {
+                    Debug.LogError("❌ Failed to create SocketIOComponent");
+                    StartCoroutine(SimulateConnection());
+                }
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ SocketIOComponent type not found - falling back to simulation");
+                StartCoroutine(SimulateConnection());
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"❌ Error creating Socket.IO connection: {e.Message}");
+            StartCoroutine(SimulateConnection());
+        }
+    }
+    
+    /// <summary>
+    /// Set additional Socket.IO options for better compatibility
+    /// </summary>
+    private void SetSocketIOOptions(object socketComponent, System.Type socketIOComponentType)
+    {
+        try
+        {
+            // Set authentication token for cross-platform compatibility
+            var queryField = socketIOComponentType.GetField("query");
+            if (queryField != null)
+            {
+                // Create query string with Unity identifier
+                var queryDict = new System.Collections.Generic.Dictionary<string, string>();
+                queryDict["token"] = "UNITY";
+                queryDict["playerId"] = "unity_" + System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                queryDict["playerName"] = "UnityPlayer";
+                queryField.SetValue(socketComponent, queryDict);
+                
+                if (enableDebugLogging)
+                    Debug.Log("🔌 Socket.IO query parameters set for Unity authentication");
+            }
+            
+            // Set timeout options if available
+            var timeoutField = socketIOComponentType.GetField("timeout");
+            if (timeoutField != null)
+            {
+                timeoutField.SetValue(socketComponent, (int)(connectionTimeout * 1000)); // Convert to milliseconds
+                if (enableDebugLogging)
+                    Debug.Log($"🔌 Socket.IO timeout set to {connectionTimeout} seconds");
+            }
+            
+            // Enable reconnection if available
+            var reconnectionField = socketIOComponentType.GetField("reconnection");
+            if (reconnectionField != null)
+            {
+                reconnectionField.SetValue(socketComponent, true);
+                if (enableDebugLogging)
+                    Debug.Log("🔌 Socket.IO reconnection enabled");
+            }
+            
+            // Set reconnection attempts if available
+            var reconnectionAttemptsField = socketIOComponentType.GetField("reconnectionAttempts");
+            if (reconnectionAttemptsField != null)
+            {
+                reconnectionAttemptsField.SetValue(socketComponent, maxReconnectAttempts);
+                if (enableDebugLogging)
+                    Debug.Log($"🔌 Socket.IO reconnection attempts set to {maxReconnectAttempts}");
+            }
+        }
+        catch (Exception e)
+        {
+            if (enableDebugLogging)
+                Debug.LogWarning($"⚠️ Could not set some Socket.IO options: {e.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Check Socket.IO connection status
+    /// </summary>
+    private System.Collections.IEnumerator CheckSocketIOConnection()
+    {
+        float timeout = connectionTimeout;
+        float elapsed = 0f;
+        
+        while (elapsed < timeout && !IsConnected)
+        {
+            // Check if socket is connected
+            if (socket != null)
+            {
+                var connectedProperty = socket.GetType().GetProperty("connected");
+                if (connectedProperty != null)
+                {
+                    bool connected = (bool)connectedProperty.GetValue(socket);
+                    if (connected)
+                    {
+                        IsConnected = true;
+                        UpdateConnectionStatus("connected");
+                        OnConnectionStateChanged?.Invoke(true);
+                        
+                        if (enableDebugLogging)
+                            Debug.Log("✅ Socket.IO connection successful!");
+                        
+                        yield break;
+                    }
+                }
+            }
+            
+            elapsed += 0.1f;
+            yield return new UnityEngine.WaitForSeconds(0.1f);
+        }
+        
+        // Connection failed or timed out
+        if (!IsConnected)
+        {
+            Debug.LogWarning($"⚠️ Socket.IO connection timeout after {timeout} seconds");
+            OnConnectionError?.Invoke("Connection timeout");
+            UpdateConnectionStatus("error");
+        }
+    }
+    
+    /// <summary>
+    /// Temporary method to simulate connection for UI testing
+    /// </summary>
+    private System.Collections.IEnumerator SimulateConnection()
+    {
+        yield return new UnityEngine.WaitForSeconds(1f);
+        
+        IsConnected = true;
+        UpdateConnectionStatus("connected");
+        OnConnectionStateChanged?.Invoke(true);
+        
+        if (enableDebugLogging)
+            Debug.Log("🌐 NetworkManager: Simulated connection successful");
+    }
+    
+    private void UpdateConnectionStatus(string status)
+    {
+        CurrentConnectionStatus.status = status;
+        CurrentConnectionStatus.isConnected = IsConnected;
+        CurrentConnectionStatus.lastHeartbeat = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        
+        OnConnectionStatusUpdated?.Invoke(CurrentConnectionStatus);
+    }
+    
+    #endregion
+    
+    #region Room Management
+    
+    /// <summary>
+    /// Create a new game room
+    /// </summary>
+    public void CreateRoom(string playerName)
+    {
+        CreateRoom(playerName, null);
+    }
+    
+    /// <summary>
+    /// Create a new game room with specific configuration
+    /// </summary>
+    public void CreateRoom(string playerName, GameConfiguration gameConfig)
+    {
+        if (!IsConnected)
+        {
+            OnRoomError?.Invoke("Not connected to server");
+            return;
+        }
+        
+        PlayerName = playerName;
+        IsHost = true;
+        
+        if (enableDebugLogging)
+        {
+            string configDesc = gameConfig?.GetFullDescription() ?? "default settings";
+            Debug.Log($"🏠 NetworkManager: Creating room for player {playerName} with {configDesc}");
+        }
+        
+        if (hasSocketIOPackage && socket != null)
+        {
+            // Send real create room message to server
+            SendCreateRoomMessage(playerName, gameConfig);
+        }
+        else
+        {
+            // Fall back to simulation
+            if (enableDebugLogging)
+                Debug.LogWarning("🔄 No Socket.IO connection - using simulation mode");
+            StartCoroutine(SimulateRoomCreation());
+        }
+    }
+    
+    /// <summary>
+    /// Join an existing game room
+    /// </summary>
+    public void JoinRoom(string roomCode, string playerName)
+    {
+        if (!IsConnected)
+        {
+            OnRoomError?.Invoke("Not connected to server");
+            return;
+        }
+        
+        PlayerName = playerName;
+        IsHost = false;
+        
+        if (enableDebugLogging)
+            Debug.Log($"🚪 NetworkManager: Joining room {roomCode} as player {playerName}");
+        
+        if (hasSocketIOPackage && socket != null)
+        {
+            // Send real join room message to server
+            SendJoinRoomMessage(roomCode, playerName);
+        }
+        else
+        {
+            // Fall back to simulation
+            if (enableDebugLogging)
+                Debug.LogWarning("🔄 No Socket.IO connection - using simulation mode");
+            StartCoroutine(SimulateRoomJoining(roomCode));
+        }
+    }
+    
+    /// <summary>
+    /// Leave the current room
+    /// </summary>
+    public void LeaveRoom()
+    {
+        if (string.IsNullOrEmpty(RoomCode)) return;
+        
+        if (enableDebugLogging)
+            Debug.Log($"👋 NetworkManager: Leaving room {RoomCode}");
+        
+        // TODO: Send leave room message to server
+        
+        RoomCode = "";
+        IsHost = false;
+        connectedPlayers.Clear();
+    }
+    
+    /// <summary>
+    /// Temporary method to simulate room creation for UI testing
+    /// </summary>
+    private System.Collections.IEnumerator SimulateRoomCreation()
+    {
+        yield return new UnityEngine.WaitForSeconds(0.5f);
+        
+        RoomCode = GenerateRoomCode();
+        AssignedColor = PieceColor.White; // Host is typically white
+        
+        OnRoomCreated?.Invoke(RoomCode, AssignedColor);
+        
+        if (enableDebugLogging)
+            Debug.Log($"🏠 NetworkManager: Room created successfully - Code: {RoomCode}");
+    }
+    
+    /// <summary>
+    /// Temporary method to simulate room joining for UI testing
+    /// </summary>
+    private System.Collections.IEnumerator SimulateRoomJoining(string roomCode)
+    {
+        yield return new UnityEngine.WaitForSeconds(0.5f);
+        
+        // Simulate specific error scenarios for testing
+        if (roomCode.ToUpper() == "ERROR" || roomCode.ToUpper() == "NOROOM")
+        {
+            OnRoomError?.Invoke("Room not found - room does not exist");
+            yield break;
+        }
+        
+        if (roomCode.ToUpper() == "FULL" || roomCode.ToUpper() == "FULLL")
+        {
+            OnRoomError?.Invoke("Room full - all player positions filled");
+            yield break;
+        }
+        
+        RoomCode = roomCode;
+        AssignedColor = PieceColor.Black; // Joiner is typically black
+        
+        OnRoomJoined?.Invoke(RoomCode, AssignedColor);
+        
+        if (enableDebugLogging)
+            Debug.Log($"🚪 NetworkManager: Joined room successfully - Code: {RoomCode}");
+    }
+    
+    private string GenerateRoomCode()
+    {
+        // Generate a 6-character room code
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Avoid confusing characters
+        var random = new System.Random();
+        var code = "";
+        
+        for (int i = 0; i < 6; i++)
+        {
+            code += chars[random.Next(chars.Length)];
+        }
+        
+        return code;
+    }
+    
+    /// <summary>
+    /// Send create room message via Socket.IO
+    /// </summary>
+    private void SendCreateRoomMessage(string playerName, GameConfiguration gameConfig)
+    {
+        try
+        {
+            if (socket == null)
+            {
+                Debug.LogError("❌ Socket is null, cannot send create room message");
+                StartCoroutine(SimulateRoomCreation());
+                return;
+            }
+            
+            // Use reflection to call emit method
+            var socketType = socket.GetType();
+            var emitMethod = socketType.GetMethod("Emit", new System.Type[] { typeof(string), typeof(object) });
+            
+            if (emitMethod != null)
+            {
+                // Create comprehensive room data including game configuration
+                var gameConfigData = new
+                {
+                    playerCount = gameConfig?.playerCount ?? 2,
+                    boardSize = gameConfig?.boardSize.ToString() ?? "Small4x4x4",
+                    chaosMode = new
+                    {
+                        enabled = gameConfig?.enableChaosMode ?? false,
+                        turnInterval = gameConfig?.chaosTurnInterval ?? 9
+                    },
+                    timedMode = new
+                    {
+                        enabled = gameConfig?.enableTimedPlay ?? false,
+                        timePerPlayer = gameConfig?.timePerPlayerMinutes ?? 10
+                    },
+                    ai = new
+                    {
+                        enabled = (gameConfig?.aiPlayerCount ?? 0) > 0,
+                        difficulty = gameConfig?.aiDifficulty.ToString() ?? "Medium"
+                    }
+                };
+                
+                var roomData = new
+                {
+                    playerName = playerName,
+                    gameConfig = gameConfigData
+                };
+                
+                emitMethod.Invoke(socket, new object[] { "create_room", roomData });
+                
+                if (enableDebugLogging)
+                {
+                    string configDesc = gameConfig?.GetFullDescription() ?? "default settings";
+                    Debug.Log($"🏠 Sent create_room message for player: {playerName} with config: {configDesc}");
+                }
+                
+                // Set up response handler
+                SetupSocketIOEventHandlers();
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ Socket.IO emit method not found, falling back to simulation");
+                StartCoroutine(SimulateRoomCreation());
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"❌ Error sending create room message: {e.Message}");
+            StartCoroutine(SimulateRoomCreation());
+        }
+    }
+    
+    /// <summary>
+    /// Send join room message via Socket.IO
+    /// </summary>
+    private void SendJoinRoomMessage(string roomCode, string playerName)
+    {
+        try
+        {
+            if (socket == null)
+            {
+                Debug.LogError("❌ Socket is null, cannot send join room message");
+                StartCoroutine(SimulateRoomJoining(roomCode));
+                return;
+            }
+            
+            // Use reflection to call emit method
+            var socketType = socket.GetType();
+            var emitMethod = socketType.GetMethod("Emit", new System.Type[] { typeof(string), typeof(object) });
+            
+            if (emitMethod != null)
+            {
+                var joinData = new
+                {
+                    roomCode = roomCode,
+                    playerName = playerName
+                };
+                
+                emitMethod.Invoke(socket, new object[] { "join_room", joinData });
+                
+                if (enableDebugLogging)
+                    Debug.Log($"🚪 Sent join_room message for room: {roomCode}, player: {playerName}");
+                
+                // Set up response handler
+                SetupSocketIOEventHandlers();
+            }
+            else
+            {
+                Debug.LogWarning("⚠️ Socket.IO emit method not found, falling back to simulation");
+                StartCoroutine(SimulateRoomJoining(roomCode));
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"❌ Error sending join room message: {e.Message}");
+            StartCoroutine(SimulateRoomJoining(roomCode));
+        }
+    }
+    
+    /// <summary>
+    /// Set up Socket.IO event handlers for room responses
+    /// </summary>
+    private void SetupSocketIOEventHandlers()
+    {
+        if (socket == null) return;
+        
+        try
+        {
+            var socketType = socket.GetType();
+            var onMethod = socketType.GetMethod("On", new System.Type[] { typeof(string), typeof(System.Action<object>) });
+            
+            if (onMethod != null)
+            {
+                // Set up room creation response handler
+                System.Action<object> roomCreatedHandler = (data) => {
+                    HandleRoomCreatedResponse(data);
+                };
+                onMethod.Invoke(socket, new object[] { "room_created", roomCreatedHandler });
+                
+                // Set up room join response handler
+                System.Action<object> roomJoinedHandler = (data) => {
+                    HandleRoomJoinedResponse(data);
+                };
+                onMethod.Invoke(socket, new object[] { "room_joined", roomJoinedHandler });
+                
+                // Set up error handlers
+                System.Action<object> errorHandler = (data) => {
+                    HandleSocketIOError(data);
+                };
+                onMethod.Invoke(socket, new object[] { "room_join_failed", errorHandler });
+                onMethod.Invoke(socket, new object[] { "room_create_failed", errorHandler });
+                
+                if (enableDebugLogging)
+                    Debug.Log("🔌 Socket.IO event handlers set up successfully");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"❌ Error setting up Socket.IO event handlers: {e.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Handle room created response from server
+    /// </summary>
+    private void HandleRoomCreatedResponse(object data)
+    {
+        try
+        {
+            if (enableDebugLogging)
+                Debug.Log($"🏠 Received room_created response: {data}");
+            
+            // In a real implementation, you would parse the JSON response
+            // For now, simulate success and generate a room code
+            RoomCode = GenerateRoomCode();
+            AssignedColor = PieceColor.White; // Host is typically white
+            
+            OnRoomCreated?.Invoke(RoomCode, AssignedColor);
+            
+            if (enableDebugLogging)
+                Debug.Log($"🏠 Room created successfully - Code: {RoomCode}");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"❌ Error handling room created response: {e.Message}");
+            OnRoomError?.Invoke("Failed to process room creation response");
+        }
+    }
+    
+    /// <summary>
+    /// Handle room joined response from server
+    /// </summary>
+    private void HandleRoomJoinedResponse(object data)
+    {
+        try
+        {
+            if (enableDebugLogging)
+                Debug.Log($"🚪 Received room_joined response: {data}");
+            
+            // In a real implementation, you would parse the JSON response
+            // For now, simulate success
+            AssignedColor = PieceColor.Black; // Joiner is typically black
+            
+            OnRoomJoined?.Invoke(RoomCode, AssignedColor);
+            
+            if (enableDebugLogging)
+                Debug.Log($"🚪 Joined room successfully - Code: {RoomCode}");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"❌ Error handling room joined response: {e.Message}");
+            OnRoomError?.Invoke("Failed to process room join response");
+        }
+    }
+    
+    /// <summary>
+    /// Handle Socket.IO errors
+    /// </summary>
+    private void HandleSocketIOError(object data)
+    {
+        try
+        {
+            string errorMessage = data?.ToString() ?? "Unknown Socket.IO error";
+            
+            if (enableDebugLogging)
+                Debug.LogError($"❌ Socket.IO error: {errorMessage}");
+            
+            OnRoomError?.Invoke(errorMessage);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"❌ Error handling Socket.IO error: {e.Message}");
+            OnRoomError?.Invoke("Failed to process server error");
+        }
+    }
+    
+    #endregion
+    
+    #region Matchmaking
+    
+    /// <summary>
+    /// Start matchmaking with user preferences
+    /// </summary>
+    public void StartMatchmaking(GameConfiguration preferences)
+    {
+        if (!IsConnected)
+        {
+            OnRoomError?.Invoke("Not connected to server");
+            return;
+        }
+        
+        if (enableDebugLogging)
+            Debug.Log($"🎯 NetworkManager: Starting matchmaking with preferences: {preferences.GetFullDescription()}");
+
+        // Store player info (default for 2-player version)
+        PlayerName = "Player";
+        IsHost = false; // Matchmaking players are not hosts initially
+        
+        // Start the progressive matchmaking simulation
+        StartCoroutine(SimulateProgressiveMatchmaking(preferences));
+    }
+    
+    /// <summary>
+    /// Simulate progressive matchmaking with 30-second window
+    /// </summary>
+    private System.Collections.IEnumerator SimulateProgressiveMatchmaking(GameConfiguration preferences)
+    {
+        float matchmakingDuration = 30f;
+        float elapsedTime = 0f;
+        
+        // Progressive matching phases
+        bool phase1Checked = false; // 5-10 seconds: existing games
+        bool phase2Checked = false; // 15-20 seconds: wait for new games
+        bool phase3Checked = false; // 25-30 seconds: final attempt
+        
+        while (elapsedTime < matchmakingDuration)
+        {
+            // Phase 1: Check existing games (5-10 seconds)
+            if (elapsedTime >= 5f && !phase1Checked)
+            {
+                phase1Checked = true;
+                OnMatchmakingProgress?.Invoke("Checking existing games...");
+                
+                if (SimulateMatchAttempt(preferences, 0.4f)) // Higher chance for existing games
+                {
+                    yield return new WaitForSeconds(1f); // Brief delay for realism
+                    CompleteMatchmaking("Found existing game!");
+                    yield break;
+                }
+            }
+            
+            // Phase 2: Wait for new games (15-20 seconds)
+            else if (elapsedTime >= 15f && !phase2Checked)
+            {
+                phase2Checked = true;
+                OnMatchmakingProgress?.Invoke("Waiting for new games to be created...");
+                
+                if (SimulateMatchAttempt(preferences, 0.3f)) // Medium chance for new games
+                {
+                    yield return new WaitForSeconds(1f);
+                    CompleteMatchmaking("Matched with new game!");
+                    yield break;
+                }
+            }
+            
+            // Phase 3: Final attempt (25-30 seconds)
+            else if (elapsedTime >= 25f && !phase3Checked)
+            {
+                phase3Checked = true;
+                OnMatchmakingProgress?.Invoke("Final attempt...");
+                
+                if (SimulateMatchAttempt(preferences, 0.2f)) // Lower chance for final attempt
+                {
+                    yield return new WaitForSeconds(1f);
+                    CompleteMatchmaking("Found game at last moment!");
+                    yield break;
+                }
+            }
+            
+            elapsedTime += Time.deltaTime;
+            yield return null;
+        }
+        
+        // Timeout - no match found
+        OnMatchmakingTimeout?.Invoke();
+        
+        if (enableDebugLogging)
+            Debug.Log("🚫 NetworkManager: Matchmaking timeout - no suitable games found");
+    }
+    
+    /// <summary>
+    /// Simulate a matchmaking attempt based on preferences
+    /// </summary>
+    private bool SimulateMatchAttempt(GameConfiguration preferences, float baseSuccessChance)
+    {
+        // SIMPLIFIED: For 2-player version, matchmaking is basic
+        // More specific preferences would reduce chance of finding match in real implementation
+        float adjustedChance = baseSuccessChance;
+
+        // Reduce chance if specific chaos mode is requested
+        if (preferences.enableChaosMode)
+        {
+            adjustedChance *= 0.7f; // Reduce by 30%
+        }
+
+        // Reduce chance if timed mode is requested
+        if (preferences.enableTimedPlay)
+        {
+            adjustedChance *= 0.7f; // Reduce by 30%
+        }
+        
+        bool success = UnityEngine.Random.Range(0f, 1f) < adjustedChance;
+        
+        if (enableDebugLogging)
+            Debug.Log($"🎲 NetworkManager: Match attempt with {adjustedChance:F2} chance = {(success ? "SUCCESS" : "FAILED")}");
+        
+        return success;
+    }
+    
+    /// <summary>
+    /// Complete successful matchmaking
+    /// </summary>
+    private void CompleteMatchmaking(string message)
+    {
+        // Generate a realistic room code for the matched game
+        RoomCode = GenerateRoomCode();
+        AssignedColor = UnityEngine.Random.Range(0f, 1f) < 0.5f ? PieceColor.White : PieceColor.Black;
+        
+        OnMatchFound?.Invoke(RoomCode, AssignedColor);
+        
+        if (enableDebugLogging)
+            Debug.Log($"🎯 NetworkManager: {message} - Room: {RoomCode}, Color: {AssignedColor}");
+    }
+    
+    #endregion
+    
+    #region Move Management
+    
+    /// <summary>
+    /// Send a move to the server
+    /// </summary>
+    public void SendMove(BoardPosition from, BoardPosition to, PieceColor playerColor)
+    {
+        if (!IsConnected || string.IsNullOrEmpty(RoomCode))
+        {
+            Debug.LogError("🌐 NetworkManager: Cannot send move - not connected or not in room");
+            return;
+        }
+        
+        var moveData = new NetworkMoveData(from, to, playerColor, GetNextMoveNumber());
+        
+        if (enableDebugLogging)
+            Debug.Log($"🎯 NetworkManager: Sending move {from} → {to} for {playerColor}");
+        
+        // TODO: Send actual move to server
+        // For now, add to pending queue for testing
+        pendingMoves.Enqueue(moveData);
+    }
+    
+    /// <summary>
+    /// Start the game (host only)
+    /// </summary>
+    public void StartGame()
+    {
+        if (!IsHost)
+        {
+            Debug.LogError("🌐 NetworkManager: Only host can start the game");
+            return;
+        }
+        
+        if (enableDebugLogging)
+            Debug.Log("🎮 NetworkManager: Starting game");
+        
+        // TODO: Send start game message to server
+        OnGameStarted?.Invoke();
+    }
+    
+    private int GetNextMoveNumber()
+    {
+        return lastGameState?.totalMoves + 1 ?? 1;
+    }
+    
+    #endregion
+    
+    #region Message Processing
+    
+    private void HandleHeartbeat()
+    {
+        if (!IsConnected) return;
+        
+        // Send heartbeat every 30 seconds
+        if (Time.time - lastHeartbeat > 30f)
+        {
+            // TODO: Send heartbeat to server
+            lastHeartbeat = Time.time;
+        }
+    }
+    
+    private void HandleReconnection()
+    {
+        if (isReconnecting && Time.time - lastPingTime > reconnectDelay)
+        {
+            if (reconnectAttempts < maxReconnectAttempts)
+            {
+                reconnectAttempts++;
+                ConnectToServer();
+                lastPingTime = Time.time;
+            }
+            else
+            {
+                isReconnecting = false;
+                OnConnectionError?.Invoke("Failed to reconnect after multiple attempts");
+            }
+        }
+    }
+    
+    private void ProcessPendingMoves()
+    {
+        // Process queued moves (temporary for testing)
+        while (pendingMoves.Count > 0)
+        {
+            var move = pendingMoves.Dequeue();
+            
+            // Simulate server processing and broadcast back
+            StartCoroutine(SimulateMoveProcessing(move));
+        }
+    }
+    
+    private System.Collections.IEnumerator SimulateMoveProcessing(NetworkMoveData move)
+    {
+        yield return new UnityEngine.WaitForSeconds(0.1f);
+        
+        // Simulate receiving the move back from server
+        OnMoveReceived?.Invoke(move);
+        
+        if (logAllMessages)
+            Debug.Log($"🎯 NetworkManager: Move processed - {move.GetFromPosition()} → {move.GetToPosition()}");
+    }
+    
+    #endregion
+    
+    #region Public API
+    
+    /// <summary>
+    /// Update server URL (must be disconnected)
+    /// </summary>
+    public void SetServerUrl(string url)
+    {
+        if (IsConnected)
+        {
+            Debug.LogWarning("🌐 NetworkManager: Cannot change server URL while connected");
+            return;
+        }
+        
+        serverUrl = url;
+        CurrentConnectionStatus.serverUrl = url;
+        
+        if (enableDebugLogging)
+            Debug.Log($"🌐 NetworkManager: Server URL updated to {url}");
+    }
+    
+    /// <summary>
+    /// Set production URL and enable production mode
+    /// </summary>
+    public void SetProductionUrl(string url)
+    {
+        if (IsConnected)
+        {
+            Debug.LogWarning("🌐 NetworkManager: Cannot change production URL while connected");
+            return;
+        }
+        
+        productionUrl = url;
+        useProductionUrl = true;
+        
+        // Update the connection status URL immediately
+        CurrentConnectionStatus.serverUrl = url;
+        
+        if (enableDebugLogging)
+            Debug.Log($"🌐 NetworkManager: Production URL set to {url}");
+    }
+    
+    /// <summary>
+    /// Save server URL to persistent config file for future auto-detection
+    /// </summary>
+    public void SaveServerUrlToConfig(string url)
+    {
+        try
+        {
+            string configPath = Path.Combine(Application.persistentDataPath, "server_config.txt");
+            File.WriteAllText(configPath, url);
+            
+            if (enableDebugLogging)
+                Debug.Log($"🌐 NetworkManager: Server URL saved to config: {url}");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"❌ Error saving server config: {e.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Get list of connected players
+    /// </summary>
+    public NetworkPlayerInfo[] GetConnectedPlayers()
+    {
+        var players = new NetworkPlayerInfo[connectedPlayers.Count];
+        connectedPlayers.Values.CopyTo(players, 0);
+        return players;
+    }
+    
+    /// <summary>
+    /// Check if it's the local player's turn
+    /// </summary>
+    public bool IsMyTurn()
+    {
+        return lastGameState?.GetCurrentPlayer() == AssignedColor;
+    }
+    
+    /// <summary>
+    /// Get the current game state
+    /// </summary>
+    public NetworkGameState GetCurrentGameState()
+    {
+        return lastGameState;
+    }
+    
+    #endregion
+    
+    #region Debug and Testing
+    
+    /// <summary>
+    /// Simulate network error for testing
+    /// </summary>
+    [ContextMenu("Simulate Connection Error")]
+    public void SimulateConnectionError()
+    {
+        if (enableDebugLogging)
+            Debug.LogWarning("🌐 NetworkManager: Simulating connection error");
+        
+        OnConnectionError?.Invoke("Simulated connection error");
+    }
+    
+    /// <summary>
+    /// Log current network state
+    /// </summary>
+    [ContextMenu("Log Network State")]
+    public void LogNetworkState()
+    {
+        Debug.Log("=== NETWORK STATE ===");
+        Debug.Log($"Connected: {IsConnected}");
+        Debug.Log($"Server URL: {serverUrl}");
+        Debug.Log($"Room Code: {RoomCode}");
+        Debug.Log($"Is Host: {IsHost}");
+        Debug.Log($"Player Name: {PlayerName}");
+        Debug.Log($"Assigned Color: {AssignedColor}");
+        Debug.Log($"Connected Players: {connectedPlayers.Count}");
+        Debug.Log("===================");
+    }
+    
+    #endregion
+}

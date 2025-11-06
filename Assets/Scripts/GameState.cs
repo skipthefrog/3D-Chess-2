@@ -99,9 +99,10 @@ public class GameStateManager : MonoBehaviour
                 {
                     PieceColor startingPlayer = TurnManager.Instance.GetCurrentPlayer();
                     Debug.Log($"GameStateManager: Turn system ready - {startingPlayer} will start (determined by check states)");
-                    
+
                     // Trigger turn changed event to notify UI and AI systems
-                    TurnManager.Instance.OnTurnChanged?.Invoke(startingPlayer);
+                    // For initial game start, previous player is same as starting player (no actual turn change yet)
+                    TurnManager.Instance.OnTurnChanged?.Invoke(startingPlayer, startingPlayer);
                 }
                 else
                 {

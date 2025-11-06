@@ -295,7 +295,7 @@ public class GameActionsUI : MonoBehaviour
     /// <summary>
     /// Handle turn changes
     /// </summary>
-    private void OnTurnChanged(PieceColor newCurrentPlayer)
+    private void OnTurnChanged(PieceColor previousPlayer, PieceColor newCurrentPlayer)
     {
         if (isVisible)
         {

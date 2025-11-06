@@ -57,10 +57,13 @@ public class ChaosRotationManager : MonoBehaviour
     // Chaos timing - configurable interval (default 9 turns)
     private int movesSinceLastChaos = 0;
     private int chaosInterval = 9; // Default interval, configurable via GameConfiguration
-    
+
     // Animation state
     private bool chaosAnimationInProgress = false;
     private Coroutine currentChaosAnimation;
+
+    // Board dimensions - MULTI-BOARD SUPPORT: Dynamically adapt to 4x4x4, 6x6x6, or 8x8x8
+    private Vector3Int boardDimensions;
     
     public static ChaosRotationManager Instance { get; private set; }
     
@@ -85,9 +88,22 @@ public class ChaosRotationManager : MonoBehaviour
     
     private void Start()
     {
+        // Get board dimensions from BoardDimensionsManager
+        if (BoardDimensionsManager.Instance != null)
+        {
+            boardDimensions = BoardDimensionsManager.Instance.GetDimensions();
+            Debug.Log($"ChaosRotationManager: Using board dimensions {boardDimensions.x}x{boardDimensions.y}x{boardDimensions.z}");
+        }
+        else
+        {
+            // Fallback to default 4x4x4 if manager not available
+            boardDimensions = new Vector3Int(4, 4, 4);
+            Debug.LogWarning("ChaosRotationManager: BoardDimensionsManager not available, using default 4x4x4");
+        }
+
         // Initialize chaos settings from game configuration
         InitializeChaosSettings();
-        
+
         Debug.Log($"ChaosRotationManager: Initialized with chaos mode {(enableChaosMode ? "ENABLED" : "DISABLED")}");
         Debug.Log($"ChaosRotationManager: Configurable chaos triggers every {chaosInterval} moves with 1-3 slice spins");
     }
@@ -197,16 +213,30 @@ public class ChaosRotationManager : MonoBehaviour
         
         Debug.Log($"🌪️ CHAOS COMPLETE: Slice rotation finished successfully");
         // OnChaosEvent?.Invoke($"🌪️ Slice rotation complete!"); // Removed: UI notification no longer needed
-        
+
         chaosAnimationInProgress = false;
-        
+
         // Clear GameStateManager animation cache to ensure immediate state updates
         if (GameStateManager.Instance != null)
         {
             GameStateManager.Instance.ClearAnimationCache();
             Debug.Log($"🌪️ ChaosRotationManager: Cleared GameStateManager animation cache after chaos completion");
         }
-        
+
+        // CHAOS MODE FIX: Add 1-second delay after animation completes before allowing turns to resume
+        // This provides the "breathing room" between chaos completion and next player's turn
+        Debug.Log($"🌪️ ChaosRotationManager: Waiting 1 second before resuming gameplay...");
+        yield return new UnityEngine.WaitForSeconds(1f);
+        Debug.Log($"🌪️ ChaosRotationManager: 1-second delay complete - resuming gameplay");
+
+        // Update check detection AFTER all rotations complete and pieces are in final positions
+        if (CheckDetectionManager.Instance != null)
+        {
+            Debug.Log($"🌪️ ChaosRotationManager: Updating check detection after chaos completion");
+            CheckDetectionManager.Instance.InvalidateCache();
+            CheckDetectionManager.Instance.SafeUpdateVisualFeedback();
+        }
+
         OnChaosRotationCompleted?.Invoke(rotationType);
     }
     
@@ -233,22 +263,23 @@ public class ChaosRotationManager : MonoBehaviour
     
     /// <summary>
     /// Execute a layer rotation (slice rotation) - 1-3 consecutive rotations
+    /// MULTI-BOARD SUPPORT: Selects layers based on actual board size
     /// </summary>
     private System.Collections.IEnumerator ExecuteLayerRotation()
     {
         // Choose random axis and layer for the entire chaos event
         RotationAxis axis = (RotationAxis)Random.Range(0, 3);
-        int layer = Random.Range(0, 4);
+        int layer = Random.Range(0, boardDimensions.x); // Use dynamic board size
         bool clockwise = Random.Range(0, 2) == 0;
-        
+
         // Choose number of rotations (1-3)
         int rotationCount = Random.Range(1, 4);
-        
-        Debug.Log($"🎲 Spinning {axis}-axis layer {layer} {rotationCount} time(s) {(clockwise ? "clockwise" : "counter-clockwise")}");
-        
+
+        Debug.Log($"🎲 Spinning {axis}-axis layer {layer} {rotationCount} time(s) {(clockwise ? "clockwise" : "counter-clockwise")} (board: {boardDimensions.x}x{boardDimensions.y}x{boardDimensions.z})");
+
         // Get positions to rotate
         List<BoardPosition> positions = GetLayerPositions(axis, layer);
-        
+
         // Apply multiple rotations to ChessBoard
         if (ChessBoard.Instance != null)
         {
@@ -256,7 +287,7 @@ public class ChaosRotationManager : MonoBehaviour
             {
                 Debug.Log($"   🎲 Rotation {i + 1}/{rotationCount}");
                 yield return StartCoroutine(AnimatePositionRotation(positions, axis, layer, clockwise));
-                
+
                 // Brief pause between rotations for visual clarity
                 if (i < rotationCount - 1)
                 {
@@ -281,81 +312,84 @@ public class ChaosRotationManager : MonoBehaviour
     
     /// <summary>
     /// Get all positions on a cube face
+    /// MULTI-BOARD SUPPORT: Works with 4x4x4, 6x6x6, or 8x8x8 boards
     /// </summary>
     private List<BoardPosition> GetFacePositions(CubeFace face)
     {
         List<BoardPosition> positions = new List<BoardPosition>();
-        
+        int maxCoord = boardDimensions.x - 1; // Assuming cubic board
+
         switch (face)
         {
             case CubeFace.Front: // Z = 0
-                for (int x = 0; x < 4; x++)
-                    for (int y = 0; y < 4; y++)
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int y = 0; y < boardDimensions.y; y++)
                         positions.Add(new BoardPosition(x, y, 0));
                 break;
-                
-            case CubeFace.Back: // Z = 3
-                for (int x = 0; x < 4; x++)
-                    for (int y = 0; y < 4; y++)
-                        positions.Add(new BoardPosition(x, y, 3));
+
+            case CubeFace.Back: // Z = max
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int y = 0; y < boardDimensions.y; y++)
+                        positions.Add(new BoardPosition(x, y, maxCoord));
                 break;
-                
+
             case CubeFace.Left: // X = 0
-                for (int y = 0; y < 4; y++)
-                    for (int z = 0; z < 4; z++)
+                for (int y = 0; y < boardDimensions.y; y++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                         positions.Add(new BoardPosition(0, y, z));
                 break;
-                
-            case CubeFace.Right: // X = 3
-                for (int y = 0; y < 4; y++)
-                    for (int z = 0; z < 4; z++)
-                        positions.Add(new BoardPosition(3, y, z));
+
+            case CubeFace.Right: // X = max
+                for (int y = 0; y < boardDimensions.y; y++)
+                    for (int z = 0; z < boardDimensions.z; z++)
+                        positions.Add(new BoardPosition(maxCoord, y, z));
                 break;
-                
-            case CubeFace.Top: // Y = 3
-                for (int x = 0; x < 4; x++)
-                    for (int z = 0; z < 4; z++)
-                        positions.Add(new BoardPosition(x, 3, z));
+
+            case CubeFace.Top: // Y = max
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int z = 0; z < boardDimensions.z; z++)
+                        positions.Add(new BoardPosition(x, maxCoord, z));
                 break;
-                
+
             case CubeFace.Bottom: // Y = 0
-                for (int x = 0; x < 4; x++)
-                    for (int z = 0; z < 4; z++)
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                         positions.Add(new BoardPosition(x, 0, z));
                 break;
         }
-        
+
         return positions;
     }
     
     /// <summary>
     /// Get all positions on a layer/slice
+    /// MULTI-BOARD SUPPORT: Works with 4x4x4, 6x6x6, or 8x8x8 boards
     /// </summary>
     private List<BoardPosition> GetLayerPositions(RotationAxis axis, int layer)
     {
         List<BoardPosition> positions = new List<BoardPosition>();
-        
+
         switch (axis)
         {
             case RotationAxis.X: // X = layer
-                for (int y = 0; y < 4; y++)
-                    for (int z = 0; z < 4; z++)
+                for (int y = 0; y < boardDimensions.y; y++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                         positions.Add(new BoardPosition(layer, y, z));
                 break;
-                
+
             case RotationAxis.Y: // Y = layer
-                for (int x = 0; x < 4; x++)
-                    for (int z = 0; z < 4; z++)
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int z = 0; z < boardDimensions.z; z++)
                         positions.Add(new BoardPosition(x, layer, z));
                 break;
-                
+
             case RotationAxis.Z: // Z = layer
-                for (int x = 0; x < 4; x++)
-                    for (int y = 0; y < 4; y++)
+                for (int x = 0; x < boardDimensions.x; x++)
+                    for (int y = 0; y < boardDimensions.y; y++)
                         positions.Add(new BoardPosition(x, y, layer));
                 break;
         }
-        
+
         return positions;
     }
     

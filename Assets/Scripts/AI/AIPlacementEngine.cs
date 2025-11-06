@@ -68,9 +68,9 @@ public class AIPlacementEngine
         if (availablePieces.Count == 0)
         {
             Debug.LogError($"🚨 AIPlacementEngine: FAILURE - No available pieces for {playerColor}");
-            
+
             // Enhanced diagnostics for piece availability failure
-            PieceTray tray = (playerColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+            PieceTray tray = PieceTray.GetTrayForColor(playerColor);
             if (tray == null)
             {
                 Debug.LogError($"🚨 AIPlacementEngine: {playerColor} tray is NULL!");
@@ -98,23 +98,26 @@ public class AIPlacementEngine
             Debug.LogError($"🚨 AIPlacementEngine: FAILURE - No valid positions for {playerColor}");
             
             // Enhanced diagnostics for position validation failure
-            int validX = PlacementManager.GetValidXForColor(playerColor);
-            Debug.LogError($"🚨 AIPlacementEngine: Expected X-layer for {playerColor}: {validX}");
-            
+            PlacementZone zone = PlacementManager.GetPlacementZoneForColor(playerColor);
+            Debug.LogError($"🚨 AIPlacementEngine: Expected zone for {playerColor}: X=[{zone.xMin}-{zone.xMax}], Y=[{zone.yMin}-{zone.yMax}], Z=[{zone.zMin}-{zone.zMax}]");
+
             if (ChessBoard.Instance == null)
             {
                 Debug.LogError($"🚨 AIPlacementEngine: ChessBoard.Instance is NULL!");
             }
             else
             {
-                Debug.LogError($"🚨 AIPlacementEngine: ChessBoard exists, checking specific positions...");
-                for (int y = 0; y < 4; y++)
+                Debug.LogError($"🚨 AIPlacementEngine: ChessBoard exists, checking specific positions in zone...");
+                for (int x = zone.xMin; x <= zone.xMax; x++)
                 {
-                    for (int z = 0; z < 4; z++)
+                    for (int y = zone.yMin; y <= zone.yMax; y++)
                     {
-                        BoardPosition pos = new BoardPosition(validX, y, z);
-                        bool canPlace = ChessBoard.Instance.CanPlacePieceAt(pos, playerColor);
-                        Debug.LogError($"  - Position {pos}: CanPlacePieceAt = {canPlace}");
+                        for (int z = zone.zMin; z <= zone.zMax; z++)
+                        {
+                            BoardPosition pos = new BoardPosition(x, y, z);
+                            bool canPlace = ChessBoard.Instance.CanPlacePieceAt(pos, playerColor);
+                            Debug.LogError($"  - Position {pos}: CanPlacePieceAt = {canPlace}");
+                        }
                     }
                 }
             }
@@ -159,8 +162,9 @@ public class AIPlacementEngine
     {
         Debug.Log($"🔍 AIPlacementEngine.GetAvailablePieces: ENTRY - Getting pieces for {playerColor}");
         List<ChessPiece> pieces = new List<ChessPiece>();
-        
-        PieceTray tray = (playerColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+
+        // Use dynamic tray lookup to support all 6 player colors
+        PieceTray tray = PieceTray.GetTrayForColor(playerColor);
         Debug.Log($"🔍 AIPlacementEngine.GetAvailablePieces: Tray reference = {(tray != null ? "EXISTS" : "NULL")}");
         
         if (tray != null)
@@ -196,30 +200,37 @@ public class AIPlacementEngine
     }
     
     /// <summary>
-    /// Get all valid placement positions for the given color
+    /// Get all valid placement positions for the given color using dynamic placement zones
     /// </summary>
     private List<BoardPosition> GetValidPlacementPositions(PieceColor playerColor)
     {
         List<BoardPosition> validPositions = new List<BoardPosition>();
-        
+
         if (ChessBoard.Instance == null) return validPositions;
-        
-        int validX = PlacementManager.GetValidXForColor(playerColor);
-        
-        // Check all positions in the valid X-layer
-        for (int y = 0; y < 4; y++)
+
+        // Get the placement zone for this color (handles 4x4x4, 6x6x6, 8x8x8 boards)
+        PlacementZone zone = PlacementManager.GetPlacementZoneForColor(playerColor);
+
+        Debug.Log($"🤖 AIPlacementEngine.GetValidPlacementPositions: {playerColor} zone = X:[{zone.xMin}-{zone.xMax}], Y:[{zone.yMin}-{zone.yMax}], Z:[{zone.zMin}-{zone.zMax}]");
+
+        // Check all positions within the placement zone
+        for (int x = zone.xMin; x <= zone.xMax; x++)
         {
-            for (int z = 0; z < 4; z++)
+            for (int y = zone.yMin; y <= zone.yMax; y++)
             {
-                BoardPosition position = new BoardPosition(validX, y, z);
-                
-                if (ChessBoard.Instance.CanPlacePieceAt(position, playerColor))
+                for (int z = zone.zMin; z <= zone.zMax; z++)
                 {
-                    validPositions.Add(position);
+                    BoardPosition position = new BoardPosition(x, y, z);
+
+                    if (ChessBoard.Instance.CanPlacePieceAt(position, playerColor))
+                    {
+                        validPositions.Add(position);
+                    }
                 }
             }
         }
-        
+
+        Debug.Log($"🤖 AIPlacementEngine.GetValidPlacementPositions: Found {validPositions.Count} valid positions for {playerColor}");
         return validPositions;
     }
     
@@ -261,30 +272,40 @@ public class AIPlacementEngine
     private float EvaluateDefensivePlacement(ChessPiece piece, BoardPosition position, PieceColor playerColor)
     {
         float score = 0f;
-        
+
+        // Get board dimensions for dynamic evaluation
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
+        // Get placement zone for this color
+        PlacementZone zone = PlacementManager.GetPlacementZoneForColor(playerColor);
+
         // King safety: prefer corners and edges for king
         if (piece.pieceType == ChessPieceType.King)
         {
-            bool isCorner = (position.y == 0 || position.y == 3) && (position.z == 0 || position.z == 3);
-            bool isEdge = position.y == 0 || position.y == 3 || position.z == 0 || position.z == 3;
-            
+            bool isCorner = (position.y == zone.yMin || position.y == zone.yMax) &&
+                            (position.z == zone.zMin || position.z == zone.zMax);
+            bool isEdge = position.y == zone.yMin || position.y == zone.yMax ||
+                          position.z == zone.zMin || position.z == zone.zMax;
+
             if (isCorner) score += KING_SAFETY_WEIGHT * 2f;
             else if (isEdge) score += KING_SAFETY_WEIGHT;
         }
-        
+
         // Major pieces in back positions (closer to x=0 for white, x=3 for black)
         if (piece.pieceType == ChessPieceType.Queen || piece.pieceType == ChessPieceType.Rook)
         {
             // In 3D chess, "back" means the layer closest to the player
             score += 1.5f; // Prefer keeping major pieces protected
         }
-        
+
         // Minor pieces can be more forward
         if (piece.pieceType == ChessPieceType.Bishop || piece.pieceType == ChessPieceType.Knight)
         {
             score += 1.0f;
         }
-        
+
         return score;
     }
     
@@ -294,42 +315,52 @@ public class AIPlacementEngine
     private float EvaluateBalancedPlacement(ChessPiece piece, BoardPosition position, PieceColor playerColor)
     {
         float score = 0f;
-        
+
+        // Get board dimensions and placement zone
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
+        PlacementZone zone = PlacementManager.GetPlacementZoneForColor(playerColor);
+
         // Center control bonus
-        float centerDistance = GetDistanceFromCenter(position);
-        score += (4f - centerDistance) * CENTER_CONTROL_WEIGHT * 0.5f;
-        
+        float centerDistance = GetDistanceFromCenter(position, zone);
+        float maxDistance = Mathf.Sqrt(Mathf.Pow((zone.yMax - zone.yMin) / 2f, 2) + Mathf.Pow((zone.zMax - zone.zMin) / 2f, 2));
+        score += (maxDistance - centerDistance) * CENTER_CONTROL_WEIGHT * 0.5f;
+
         // Piece-specific positioning
         switch (piece.pieceType)
         {
             case ChessPieceType.King:
-                // Moderate king safety
-                bool isProtected = position.y > 0 && position.y < 3 && position.z > 0 && position.z < 3;
+                // Moderate king safety - prefer positions away from edges
+                bool isProtected = position.y > zone.yMin && position.y < zone.yMax &&
+                                   position.z > zone.zMin && position.z < zone.zMax;
                 if (isProtected) score += KING_SAFETY_WEIGHT * 0.7f;
                 break;
-                
+
             case ChessPieceType.Queen:
                 // Queens prefer central positions but not too exposed
-                score += (4f - centerDistance) * 1.2f;
+                score += (maxDistance - centerDistance) * 1.2f;
                 break;
-                
+
             case ChessPieceType.Rook:
                 // Rooks prefer corners and edges for file/rank control
-                bool onEdge = position.y == 0 || position.y == 3 || position.z == 0 || position.z == 3;
+                bool onEdge = position.y == zone.yMin || position.y == zone.yMax ||
+                              position.z == zone.zMin || position.z == zone.zMax;
                 if (onEdge) score += 1.0f;
                 break;
-                
+
             case ChessPieceType.Bishop:
                 // Bishops prefer positions with diagonal control
                 score += 1.0f + Random.Range(0f, 0.5f);
                 break;
-                
+
             case ChessPieceType.Knight:
                 // Knights prefer central positions for maximum mobility
-                score += (4f - centerDistance) * 1.0f;
+                score += (maxDistance - centerDistance) * 1.0f;
                 break;
         }
-        
+
         return score;
     }
     
@@ -339,52 +370,64 @@ public class AIPlacementEngine
     private float EvaluateAggressivePlacement(ChessPiece piece, BoardPosition position, PieceColor playerColor)
     {
         float score = 0f;
-        
+
+        // Get board dimensions and placement zone
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
+        PlacementZone zone = PlacementManager.GetPlacementZoneForColor(playerColor);
+
         // Strong center control emphasis
-        float centerDistance = GetDistanceFromCenter(position);
-        score += (4f - centerDistance) * CENTER_CONTROL_WEIGHT;
-        
+        float centerDistance = GetDistanceFromCenter(position, zone);
+        float maxDistance = Mathf.Sqrt(Mathf.Pow((zone.yMax - zone.yMin) / 2f, 2) + Mathf.Pow((zone.zMax - zone.zMin) / 2f, 2));
+        score += (maxDistance - centerDistance) * CENTER_CONTROL_WEIGHT;
+
+        // Calculate zone center for safety checks
+        float centerY = (zone.yMin + zone.yMax) / 2f;
+        float centerZ = (zone.zMin + zone.zMax) / 2f;
+
         // Piece-specific aggressive positioning
         switch (piece.pieceType)
         {
             case ChessPieceType.King:
-                // Still prioritize king safety but less conservatively
-                bool isReasonablySafe = !(position.y == 1.5f && position.z == 1.5f); // Avoid dead center
+                // Still prioritize king safety but less conservatively - avoid dead center
+                bool isReasonablySafe = !(Mathf.Abs(position.y - centerY) < 0.5f && Mathf.Abs(position.z - centerZ) < 0.5f);
                 if (isReasonablySafe) score += KING_SAFETY_WEIGHT * 0.5f;
                 break;
-                
+
             case ChessPieceType.Queen:
                 // Queens in central, commanding positions
-                score += (4f - centerDistance) * 2.0f;
+                score += (maxDistance - centerDistance) * 2.0f;
                 break;
-                
+
             case ChessPieceType.Rook:
                 // Rooks in positions to control files/ranks
                 score += 1.5f;
                 break;
-                
+
             case ChessPieceType.Bishop:
                 // Bishops in positions for long diagonal control
-                score += (4f - centerDistance) * 1.3f;
+                score += (maxDistance - centerDistance) * 1.3f;
                 break;
-                
+
             case ChessPieceType.Knight:
                 // Knights in forward, central positions
-                score += (4f - centerDistance) * 1.5f;
+                score += (maxDistance - centerDistance) * 1.5f;
                 break;
         }
-        
+
         return score;
     }
     
     /// <summary>
-    /// Calculate distance from board center (1.5, 1.5 in Y-Z plane)
+    /// Calculate distance from placement zone center (dynamic based on zone size)
     /// </summary>
-    private float GetDistanceFromCenter(BoardPosition position)
+    private float GetDistanceFromCenter(BoardPosition position, PlacementZone zone)
     {
-        float centerY = 1.5f;
-        float centerZ = 1.5f;
-        
+        float centerY = (zone.yMin + zone.yMax) / 2f;
+        float centerZ = (zone.zMin + zone.zMax) / 2f;
+
         return Mathf.Sqrt(Mathf.Pow(position.y - centerY, 2) + Mathf.Pow(position.z - centerZ, 2));
     }
 }

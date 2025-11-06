@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 /// <summary>
 /// Simple UI for the placement phase
@@ -10,54 +11,90 @@ public class PlacementUI : MonoBehaviour
     public bool showUI = true;
     public float buttonWidth = 150f;
     public float buttonHeight = 50f;
-    
-    private Rect readyButtonRect;
-    private Rect whiteReadyButtonRect;
-    private Rect blackReadyButtonRect;
-    private Rect resetButtonRect;
+
+    private Dictionary<PieceColor, Rect> playerReadyButtonRects = new Dictionary<PieceColor, Rect>();
     private Rect deselectButtonRect;
-    private Rect interiorViewButtonRect;
-    private Rect overviewButtonRect;
     private Rect stateInfoRect;
-    private Rect cameraInfoRect;
     private string currentStateText = "";
     
     private void Start()
     {
         // Calculate UI positions
-        float screenWidth = Screen.width;
-        float screenHeight = Screen.height;
-        
-        // Position buttons in top-left corner
-        readyButtonRect = new Rect(20, 20, buttonWidth, buttonHeight);
-        whiteReadyButtonRect = new Rect(20, 20, buttonWidth, buttonHeight);
-        blackReadyButtonRect = new Rect(20 + buttonWidth + 10, 20, buttonWidth, buttonHeight);
-        resetButtonRect = new Rect(20, 80, buttonWidth, buttonHeight);
         deselectButtonRect = new Rect(20, 140, buttonWidth, buttonHeight);
-        interiorViewButtonRect = new Rect(20, 260, buttonWidth, buttonHeight);
-        overviewButtonRect = new Rect(20, 320, buttonWidth, buttonHeight);
         stateInfoRect = new Rect(20, 380, buttonWidth * 2, buttonHeight * 2);
-        cameraInfoRect = new Rect(20, 480, buttonWidth * 3, buttonHeight);
-        
+
+        // Calculate ready button positions dynamically based on player count
+        CalculatePlayerReadyButtonPositions();
+
         // Subscribe to game state changes
         if (GameStateManager.Instance != null)
         {
             GameStateManager.Instance.OnStateChanged += OnGameStateChanged;
             UpdateStateText(GameStateManager.Instance.currentState);
         }
-        
+
         // Subscribe to placement manager events
         if (PlacementManager.Instance != null)
         {
             PlacementManager.Instance.OnPlayerTurnChanged += OnPlayerTurnChanged;
             PlacementManager.Instance.OnPlacementPhaseComplete += OnPlacementPhaseComplete;
         }
-        
+
         // Subscribe to turn manager events for gameplay turn changes
         if (TurnManager.Instance != null)
         {
             TurnManager.Instance.OnTurnChanged += OnGameplayTurnChanged;
         }
+    }
+
+    /// <summary>
+    /// Calculate ready button positions based on active player count
+    /// MULTI-PLAYER SUPPORT: Dynamically position buttons for 2-6 players
+    /// </summary>
+    private void CalculatePlayerReadyButtonPositions()
+    {
+        // Get all active players
+        List<PieceColor> activePlayers = new List<PieceColor>();
+        if (PlayerManager.Instance != null)
+        {
+            activePlayers = PlayerManager.Instance.GetActivePlayers();
+        }
+        else
+        {
+            // Fallback to 2-player mode
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+        }
+
+        int playerCount = activePlayers.Count;
+
+        // Calculate button dimensions based on player count
+        float btnWidth = buttonWidth;
+        float btnGap = 10f;
+
+        if (playerCount == 4)
+        {
+            btnWidth = 120f; // Slightly narrower for 4 players
+            btnGap = 5f;
+        }
+        else if (playerCount >= 6)
+        {
+            btnWidth = 100f; // Compact for 6 players
+            btnGap = 5f;
+        }
+
+        // Position buttons horizontally starting at x=20, y=20
+        float startX = 20f;
+        float startY = 20f;
+
+        for (int i = 0; i < activePlayers.Count; i++)
+        {
+            PieceColor player = activePlayers[i];
+            float xPos = startX + (i * (btnWidth + btnGap));
+            playerReadyButtonRects[player] = new Rect(xPos, startY, btnWidth, buttonHeight);
+        }
+
+        Debug.Log($"PlacementUI: Calculated {playerCount} ready button positions");
     }
     
     private void OnDestroy()
@@ -83,11 +120,18 @@ public class PlacementUI : MonoBehaviour
     private void OnGUI()
     {
         if (!showUI) return;
-        
+
+        // Hide PlacementUI when game is over (status bar already shows game over message)
+        if (GameStateManager.Instance != null &&
+            GameStateManager.Instance.currentState == GameState.GameOver)
+        {
+            return;
+        }
+
         // Set GUI style
-        GUI.skin.button.fontSize = 16;
+        GUI.skin.button.fontSize = 14; // Reduced from 16 for better fit in narrow buttons
         GUI.skin.label.fontSize = 14;
-        
+
         // Game state info
         GUI.Label(stateInfoRect, currentStateText);
         
@@ -99,26 +143,9 @@ public class PlacementUI : MonoBehaviour
         // Only show buttons during placement phase
         if (GameStateManager.Instance != null && GameStateManager.Instance.CanPlacePieces())
         {
-            // Check if this is human vs human mode
-            bool isHumanVsHuman = TurnManager.Instance != null && TurnManager.Instance.IsHumanVsHuman();
-            
-            if (isHumanVsHuman)
-            {
-                // Show separate ready buttons for each player in human vs human mode
-                ShowDualPlayerReadyButtons();
-            }
-            else
-            {
-                // Show single ready button for other modes
-                ShowSingleReadyButton();
-            }
-            
-            // Reset button
-            if (GUI.Button(resetButtonRect, "Reset Trays"))
-            {
-                OnResetButtonClicked();
-            }
-            
+            // MULTI-PLAYER SUPPORT: Always show individual ready buttons for all active players
+            ShowMultiPlayerReadyButtons();
+
             // Deselect button - only show if a piece is selected
             if (PlacementManager.Instance != null && HasSelectedTrayPiece())
             {
@@ -128,22 +155,9 @@ public class PlacementUI : MonoBehaviour
                 }
             }
         }
-        
-        
-        // Show camera control buttons
-        if (cameraController != null)
-        {
-            if (GUI.Button(interiorViewButtonRect, "Close Zoom"))
-            {
-                cameraController.SetZoomPreset(5f);
-            }
-            
-            if (GUI.Button(overviewButtonRect, "Far Zoom"))
-            {
-                cameraController.SetZoomPreset(20f);
-            }
-        }
-        
+
+        // Camera control buttons removed - users can use I/O keyboard shortcuts or mouse wheel/pinch zoom instead
+
         // Show instructions
         string instructions = GetInstructions();
         if (!string.IsNullOrEmpty(instructions))
@@ -154,101 +168,237 @@ public class PlacementUI : MonoBehaviour
     }
     
     /// <summary>
-    /// Show single ready button for non-human vs human modes
+    /// Get color-tinted grey background color for a player (not ready state)
+    /// MULTI-PLAYER SUPPORT: Each player has a unique tinted grey
     /// </summary>
-    private void ShowSingleReadyButton()
+    private Color GetPlayerGreyColor(PieceColor player)
     {
-        bool canStartGame = CanStartGame();
-        GUI.enabled = canStartGame; // Disable button if can't start
-        
-        string buttonText = canStartGame ? "Ready to Play" : "Place Pieces First";
-        if (GUI.Button(readyButtonRect, buttonText))
+        switch (player)
         {
-            OnReadyButtonClicked();
+            case PieceColor.White:
+                return new Color(0.7f, 0.7f, 0.7f); // Light grey
+            case PieceColor.Black:
+                return new Color(0.3f, 0.3f, 0.3f); // Dark grey
+            case PieceColor.Green:
+                return new Color(0.4f, 0.7f, 0.4f); // Green-grey
+            case PieceColor.Purple:
+                return new Color(0.6f, 0.4f, 0.7f); // Purple-grey
+            case PieceColor.Yellow:
+                return new Color(0.7f, 0.7f, 0.4f); // Yellow-grey
+            case PieceColor.Orange:
+                return new Color(0.7f, 0.5f, 0.3f); // Orange-grey
+            default:
+                return Color.grey;
         }
-        
-        GUI.enabled = true; // Re-enable GUI
     }
-    
+
+    /// <summary>
+    /// Get medium-saturation color for a player (pieces placed, ready to click)
+    /// MULTI-PLAYER SUPPORT: Each player has a medium-saturation color indicating button is active
+    /// </summary>
+    private Color GetPlayerMediumColor(PieceColor player)
+    {
+        switch (player)
+        {
+            case PieceColor.White:
+                return new Color(0.9f, 0.9f, 0.9f); // Medium-bright white
+            case PieceColor.Black:
+                return new Color(0.4f, 0.4f, 0.4f); // Medium grey
+            case PieceColor.Green:
+                return new Color(0.3f, 0.85f, 0.3f); // Medium green
+            case PieceColor.Purple:
+                return new Color(0.7f, 0.3f, 0.85f); // Medium purple
+            case PieceColor.Yellow:
+                return new Color(0.85f, 0.85f, 0.3f); // Medium yellow
+            case PieceColor.Orange:
+                return new Color(0.85f, 0.55f, 0.3f); // Medium orange
+            default:
+                return new Color(0.5f, 0.7f, 0.5f); // Medium green-grey
+        }
+    }
+
+    /// <summary>
+    /// Get bright color for a player (ready state)
+    /// MULTI-PLAYER SUPPORT: Each player transitions to their bright color when ready
+    /// </summary>
+    private Color GetPlayerBrightColor(PieceColor player)
+    {
+        switch (player)
+        {
+            case PieceColor.White:
+                return new Color(1.0f, 1.0f, 1.0f); // Bright white
+            case PieceColor.Black:
+                return new Color(0.5f, 0.5f, 0.5f); // Medium grey
+            case PieceColor.Green:
+                return new Color(0.2f, 1.0f, 0.2f); // Bright green
+            case PieceColor.Purple:
+                return new Color(0.8f, 0.2f, 1.0f); // Bright purple
+            case PieceColor.Yellow:
+                return new Color(1.0f, 1.0f, 0.2f); // Bright yellow
+            case PieceColor.Orange:
+                return new Color(1.0f, 0.6f, 0.2f); // Bright orange
+            default:
+                return Color.green;
+        }
+    }
+
     /// <summary>
     /// Show separate ready buttons for each player in human vs human mode
+    /// MULTI-PLAYER SUPPORT: Dynamically shows buttons for all active players (2-6)
     /// </summary>
-    private void ShowDualPlayerReadyButtons()
+    private void ShowMultiPlayerReadyButtons()
     {
         bool canStartGame = CanStartGame();
-        
-        // Debug logging for button state diagnosis
-        if (PlacementManager.Instance != null)
+
+        // Get all active players
+        List<PieceColor> activePlayers = new List<PieceColor>();
+        if (PlayerManager.Instance != null)
         {
-            bool whiteReadyState = PlacementManager.Instance.IsPlayerReady(PieceColor.White);
-            bool blackReadyState = PlacementManager.Instance.IsPlayerReady(PieceColor.Black);
-            
-            if (Time.frameCount % 60 == 0) // Log once per second
+            activePlayers = PlayerManager.Instance.GetActivePlayers();
+        }
+        else
+        {
+            // Fallback to 2-player mode
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+        }
+
+        // Debug logging for button state diagnosis
+        if (PlacementManager.Instance != null && Time.frameCount % 60 == 0) // Log once per second
+        {
+            string readyStates = "PlacementUI: Ready button states - canStartGame=" + canStartGame;
+            foreach (PieceColor player in activePlayers)
             {
-                Debug.Log($"PlacementUI: Ready button state - canStartGame={canStartGame}, White ready={whiteReadyState}, Black ready={blackReadyState}");
+                bool playerReady = PlacementManager.Instance.IsPlayerReady(player);
+                readyStates += $", {player}={playerReady}";
+            }
+            Debug.Log(readyStates);
+        }
+
+        Color originalColor = GUI.backgroundColor;
+
+        // Show button for each active player
+        foreach (PieceColor player in activePlayers)
+        {
+            if (!playerReadyButtonRects.ContainsKey(player))
+            {
+                Debug.LogWarning($"PlacementUI: No button rect found for {player}");
+                continue;
+            }
+
+            bool playerReady = PlacementManager.Instance != null && PlacementManager.Instance.IsPlayerReady(player);
+            bool allPiecesPlaced = PlacementManager.Instance != null &&
+                                   PlacementManager.Instance.IsPlayerPlacementCompleted(player);
+
+            GUI.enabled = allPiecesPlaced; // Only enable if all pieces are placed
+
+            // Determine button text - two-line format with full color name
+            string colorName = player.ToString(); // White, Black, Green, Purple, Yellow, Orange
+            string buttonText;
+            if (playerReady)
+            {
+                buttonText = $"{colorName}\nReady ✓";  // e.g., "White\nReady ✓"
+            }
+            else if (allPiecesPlaced)
+            {
+                buttonText = $"{colorName}\nReady to Play";  // e.g., "White\nReady to Play"
+            }
+            else
+            {
+                buttonText = $"{colorName}\nPlace Pieces";  // e.g., "White\nPlace Pieces"
+            }
+
+            // Set button color with three-state progression:
+            // 1. Grey tint (pieces not all placed) - desaturated, "disabled" appearance
+            // 2. Bright/vibrant (all pieces placed, ready to click) - active, prominent, clickable appearance
+            // 3. Medium saturation (player marked ready) - confirmed but dimmed, "ready" appearance
+            Color buttonColor;
+
+            if (playerReady)
+            {
+                buttonColor = GetPlayerMediumColor(player); // State 3: Clicked ready (dimmed)
+            }
+            else if (allPiecesPlaced)
+            {
+                buttonColor = GetPlayerBrightColor(player); // State 2: All pieces placed, clickable (bright)
+            }
+            else
+            {
+                buttonColor = GetPlayerGreyColor(player); // State 1: Still placing pieces
+            }
+            GUI.backgroundColor = buttonColor;
+
+            // Draw button
+            if (GUI.Button(playerReadyButtonRects[player], buttonText))
+            {
+                OnPlayerReadyButtonClicked(player);
             }
         }
-        
-        // White player ready button
-        bool whiteReady = PlacementManager.Instance != null && PlacementManager.Instance.IsPlayerReady(PieceColor.White);
-        GUI.enabled = canStartGame; // Only enable if pieces are placed
-        
-        string whiteButtonText = whiteReady ? "White Ready ✓" : (canStartGame ? "White Ready?" : "White: Place Pieces");
-        Color originalColor = GUI.backgroundColor;
-        GUI.backgroundColor = whiteReady ? Color.green : Color.white;
-        
-        if (GUI.Button(whiteReadyButtonRect, whiteButtonText))
-        {
-            OnPlayerReadyButtonClicked(PieceColor.White);
-        }
-        
-        // Black player ready button
-        bool blackReady = PlacementManager.Instance != null && PlacementManager.Instance.IsPlayerReady(PieceColor.Black);
-        
-        string blackButtonText = blackReady ? "Black Ready ✓" : (canStartGame ? "Black Ready?" : "Black: Place Pieces");
-        GUI.backgroundColor = blackReady ? Color.green : Color.gray;
-        
-        if (GUI.Button(blackReadyButtonRect, blackButtonText))
-        {
-            OnPlayerReadyButtonClicked(PieceColor.Black);
-        }
-        
+
         GUI.backgroundColor = originalColor; // Restore original color
         GUI.enabled = true; // Re-enable GUI
     }
     
     /// <summary>
     /// Check if the game can be started (enough pieces placed)
+    /// MULTI-PLAYER SUPPORT: Checks that all active players have placed at least one piece
     /// </summary>
     private bool CanStartGame()
     {
-        // Check that both players have at least one piece on the board
+        // Check that all active players have at least one piece on the board
         if (ChessBoard.Instance == null) return false;
-        
-        bool hasWhitePieces = false;
-        bool hasBlackPieces = false;
-        
-        // Check all board positions for pieces
-        for (int x = 0; x < 4; x++)
+
+        // Get all active players
+        List<PieceColor> activePlayers = new List<PieceColor>();
+        if (PlayerManager.Instance != null)
         {
-            for (int y = 0; y < 4; y++)
+            activePlayers = PlayerManager.Instance.GetActivePlayers();
+        }
+        else
+        {
+            // Fallback to 2-player mode
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+        }
+
+        // Get dynamic board dimensions
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4
+
+        // Track which players have pieces on the board
+        Dictionary<PieceColor, bool> playerHasPieces = new Dictionary<PieceColor, bool>();
+        foreach (PieceColor player in activePlayers)
+        {
+            playerHasPieces[player] = false;
+        }
+
+        // Check all board positions for pieces using dynamic dimensions
+        for (int x = 0; x < dims.x; x++)
+        {
+            for (int y = 0; y < dims.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < dims.z; z++)
                 {
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
-                    if (piece != null)
+                    if (piece != null && playerHasPieces.ContainsKey(piece.pieceColor))
                     {
-                        if (piece.pieceColor == PieceColor.White)
-                            hasWhitePieces = true;
-                        else if (piece.pieceColor == PieceColor.Black)
-                            hasBlackPieces = true;
+                        playerHasPieces[piece.pieceColor] = true;
                     }
                 }
             }
         }
-        
-        // Require at least one piece from each player
-        return hasWhitePieces && hasBlackPieces;
+
+        // Require at least one piece from each active player
+        foreach (var kvp in playerHasPieces)
+        {
+            if (!kvp.Value)
+            {
+                return false; // This player has no pieces placed
+            }
+        }
+
+        return true; // All players have at least one piece
     }
     
     /// <summary>
@@ -275,26 +425,6 @@ public class PlacementUI : MonoBehaviour
     }
     
     /// <summary>
-    /// Handle Ready button click
-    /// </summary>
-    private void OnReadyButtonClicked()
-    {
-        Debug.Log("PlacementUI: Ready to Play button clicked");
-        
-        if (!CanStartGame())
-        {
-            Debug.LogWarning("PlacementUI: Cannot start game - not enough pieces placed");
-            return;
-        }
-        
-        if (PlacementManager.Instance != null)
-        {
-            Debug.Log("PlacementUI: Starting gameplay phase...");
-            PlacementManager.Instance.CompletePlacementPhase();
-        }
-    }
-    
-    /// <summary>
     /// Handle individual player ready button click
     /// </summary>
     private void OnPlayerReadyButtonClicked(PieceColor playerColor)
@@ -314,19 +444,6 @@ public class PlacementUI : MonoBehaviour
             PlacementManager.Instance.SetPlayerReady(playerColor, !currentReadiness);
             
             Debug.Log($"PlacementUI: {playerColor} readiness set to {!currentReadiness}");
-        }
-    }
-    
-    /// <summary>
-    /// Handle Reset button click
-    /// </summary>
-    private void OnResetButtonClicked()
-    {
-        Debug.Log("PlacementUI: Reset button clicked");
-        
-        if (PlacementManager.Instance != null)
-        {
-            PlacementManager.Instance.ResetToTrays();
         }
     }
     
@@ -381,10 +498,10 @@ public class PlacementUI : MonoBehaviour
     /// <summary>
     /// Handle turn changes during gameplay
     /// </summary>
-    private void OnGameplayTurnChanged(PieceColor newCurrentPlayer)
+    private void OnGameplayTurnChanged(PieceColor previousPlayer, PieceColor newCurrentPlayer)
     {
-        Debug.Log($"PlacementUI: Gameplay turn changed to {newCurrentPlayer}");
-        
+        Debug.Log($"PlacementUI: Gameplay turn changed from {previousPlayer} to {newCurrentPlayer}");
+
         // Update the UI display to reflect the new current player
         if (GameStateManager.Instance != null)
         {
@@ -394,6 +511,7 @@ public class PlacementUI : MonoBehaviour
     
     /// <summary>
     /// Update the state text display
+    /// MULTI-PLAYER SUPPORT: Shows readiness for all active players
     /// </summary>
     private void UpdateStateText(GameState state)
     {
@@ -405,23 +523,42 @@ public class PlacementUI : MonoBehaviour
                 string readinessInfo = "";
                 if (isHumanVsHuman && PlacementManager.Instance != null)
                 {
-                    bool whiteReady = PlacementManager.Instance.IsPlayerReady(PieceColor.White);
-                    bool blackReady = PlacementManager.Instance.IsPlayerReady(PieceColor.Black);
-                    readinessInfo = $"White Ready: {(whiteReady ? "✓" : "✗")} | Black Ready: {(blackReady ? "✓" : "✗")}";
+                    // Get all active players
+                    List<PieceColor> activePlayers = new List<PieceColor>();
+                    if (PlayerManager.Instance != null)
+                    {
+                        activePlayers = PlayerManager.Instance.GetActivePlayers();
+                    }
+                    else
+                    {
+                        // Fallback to 2-player mode
+                        activePlayers.Add(PieceColor.White);
+                        activePlayers.Add(PieceColor.Black);
+                    }
+
+                    // Build readiness display for all players
+                    List<string> playerReadiness = new List<string>();
+                    foreach (PieceColor player in activePlayers)
+                    {
+                        bool playerReady = PlacementManager.Instance.IsPlayerReady(player);
+                        string initial = player.ToString().Substring(0, 1); // W, B, G, P, Y, O
+                        playerReadiness.Add($"{initial}:{(playerReady ? "✓" : "✗")}");
+                    }
+                    readinessInfo = string.Join(" ", playerReadiness);
                 }
-                
+
                 // Remove "PLACEMENT PHASE" text to avoid duplication with status bar
                 currentStateText = readinessInfo;
                 break;
-                
+
             case GameState.Playing:
                 currentStateText = "";
                 break;
-                
+
             case GameState.GameOver:
                 currentStateText = "GAME OVER";
                 break;
-                
+
             default:
                 currentStateText = $"STATE: {state}";
                 break;

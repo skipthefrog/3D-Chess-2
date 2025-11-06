@@ -152,13 +152,30 @@ public class SceneController : MonoBehaviour
             Debug.LogError("SceneController: Cannot load game scene with null configuration");
             return;
         }
-        
+
         Debug.Log($"SceneController: Loading Game Scene with config: {config}");
-        
+        Debug.Log($"🔍 TRACE LoadGameScene: Received config.boardSize = {config.boardSize}");
+
         // Store the configuration for when the scene loads
         pendingGameConfig = config.Clone();
+        Debug.Log($"🔍 TRACE LoadGameScene: pendingGameConfig.boardSize = {pendingGameConfig.boardSize}");
         OnGameConfigurationSet?.Invoke(pendingGameConfig);
-        
+
+        // CRITICAL: Apply board size BEFORE loading scene to ensure EmergencyChessBoard.Start() sees correct dimensions
+        // BoardDimensionsManager persists via DontDestroyOnLoad, so set it now before scene transition
+        Debug.Log($"🔍 TRACE LoadGameScene: BoardDimensionsManager.Instance = {(BoardDimensionsManager.Instance != null ? "EXISTS" : "NULL")}");
+        if (BoardDimensionsManager.Instance != null)
+        {
+            Debug.Log($"🔍 TRACE LoadGameScene: About to call SetBoardSize({config.boardSize})");
+            BoardDimensionsManager.Instance.SetBoardSize(config.boardSize);
+            Debug.Log($"SceneController.LoadGameScene: Applied board size {config.boardSize} to BoardDimensionsManager BEFORE scene load");
+            Debug.Log($"🔍 TRACE LoadGameScene: BoardDimensionsManager now reports dimensions = {BoardDimensionsManager.Instance.GetDimensions()}");
+        }
+        else
+        {
+            Debug.LogWarning("SceneController.LoadGameScene: BoardDimensionsManager.Instance not found, board size will be applied after scene load");
+        }
+
         LoadScene(gameSceneName);
     }
     
@@ -287,20 +304,59 @@ public class SceneController : MonoBehaviour
     /// </summary>
     private IEnumerator ApplyConfigurationDelayed(GameConfiguration config)
     {
-        yield return null; // Wait one frame
-        
+        // CRITICAL: Apply board size BEFORE yield to ensure it's set before Start() methods execute
+        // EmergencyChessBoard.Start() needs this value immediately on scene load
+        Debug.Log($"🔍 TRACE ApplyConfigDelayed: config.boardSize = {config.boardSize}");
+        Debug.Log($"🔍 TRACE ApplyConfigDelayed: BoardDimensionsManager.Instance = {(BoardDimensionsManager.Instance != null ? "EXISTS" : "NULL")}");
+        if (BoardDimensionsManager.Instance != null)
+        {
+            Debug.Log($"🔍 TRACE ApplyConfigDelayed: BoardDimensionsManager dimensions BEFORE = {BoardDimensionsManager.Instance.GetDimensions()}");
+            Debug.Log($"🔍 TRACE ApplyConfigDelayed: About to call SetBoardSize({config.boardSize})");
+            BoardDimensionsManager.Instance.SetBoardSize(config.boardSize);
+            Debug.Log($"SceneController: Applied board size {config.boardSize} to BoardDimensionsManager (BEFORE yield)");
+            Debug.Log($"🔍 TRACE ApplyConfigDelayed: BoardDimensionsManager dimensions AFTER = {BoardDimensionsManager.Instance.GetDimensions()}");
+        }
+        else
+        {
+            Debug.LogWarning("SceneController: BoardDimensionsManager.Instance not found when applying board size");
+        }
+
+        yield return null; // Wait one frame for other managers to initialize
+
+        // Apply to PlayerManager (CRITICAL for scalable turn cycling)
+        if (PlayerManager.Instance != null)
+        {
+            PlayerManager.Instance.InitializePlayers(config);
+            Debug.Log($"SceneController: Initialized PlayerManager with {config.playerCount} players");
+        }
+        else
+        {
+            Debug.LogWarning("SceneController: PlayerManager.Instance not found when applying configuration");
+        }
+
         // Apply to TurnManager
         if (TurnManager.Instance != null)
         {
-            TurnManager.Instance.SetGameMode(config.whitePlayerType, config.blackPlayerType);
+            // CRITICAL: Only use SetGameMode for 2-player games (uses legacy whitePlayerType/blackPlayerType fields)
+            // For multi-player games (3-6 players), PlayerManager.InitializePlayers() already set all player types
+            // Calling SetGameMode() would overwrite the correct multi-player configuration
+            if (config.playerCount == 2)
+            {
+                TurnManager.Instance.SetGameMode(config.whitePlayerType, config.blackPlayerType);
+                Debug.Log("SceneController: Applied player types to TurnManager (2-player mode)");
+            }
+            else
+            {
+                Debug.Log($"SceneController: Skipping TurnManager.SetGameMode for {config.playerCount}-player game (PlayerManager already configured)");
+            }
+
             TurnManager.Instance.SetTurnValidation(config.enableTurnValidation);
-            Debug.Log("SceneController: Applied player types to TurnManager");
         }
         else
         {
             Debug.LogWarning("SceneController: TurnManager.Instance not found when applying configuration");
         }
-        
+
         // Apply to AIPlayer
         if (AIPlayer.Instance != null)
         {

@@ -24,7 +24,7 @@ public class ThreatIndicatorManager : MonoBehaviour
     [Range(0.1f, 1.0f)]
     public float attackPathWidth = 0.2f;  // MODERATE: Thicker than default but not extreme
     [Range(0.1f, 1.0f)]
-    public float attackPathAlpha = 0.7f;  // MODERATE: More visible than default but not extreme
+    public float attackPathAlpha = 0.6f;  // Semi-transparent red lines matching check indicator opacity (60%)
     
     public static ThreatIndicatorManager Instance { get; private set; }
     
@@ -35,7 +35,7 @@ public class ThreatIndicatorManager : MonoBehaviour
     
     // DEBOUNCE: Prevent duplicate threat indicator updates
     private Dictionary<PieceColor, float> lastUpdateTime = new Dictionary<PieceColor, float>();
-    private const float UPDATE_DEBOUNCE_TIME = 0.3f; // 300ms debounce (increased to prevent rapid flashing)
+    private const float UPDATE_DEBOUNCE_TIME = 0.05f; // 50ms debounce (minimal delay to match red check indicator speed)
     
     private void Awake()
     {
@@ -90,14 +90,10 @@ public class ThreatIndicatorManager : MonoBehaviour
             Debug.Log("🟠 ThreatIndicatorManager.ShowThreatIndicators: Disabled or CheckDetectionManager not available - EXITING");
             return;
         }
-        
-        // ANIMATION STATE BLOCKING: Check if ANY pieces are moving before proceeding
-        if (AnyPiecesMovingOnBoard())
-        {
-            Debug.Log($"🟠 ThreatIndicatorManager.ShowThreatIndicators: Pieces still moving on board, blocking threat indicators for {kingColor} king - EXITING");
-            return;
-        }
-        
+
+        // REMOVED: Animation state blocking to match red check indicator's instant appearance
+        // Orange indicators now appear immediately, just like red check indicator
+
         // DEBOUNCE: Prevent rapid duplicate updates for the same king
         float currentTime = Time.time;
         if (lastUpdateTime.ContainsKey(kingColor))
@@ -218,35 +214,58 @@ public class ThreatIndicatorManager : MonoBehaviour
             Debug.LogWarning("ThreatIndicatorManager.ClearThreatIndicatorsForResolvedKing: CheckDetectionManager not available");
             return;
         }
-        
+
         Debug.Log($"🟢 ThreatIndicatorManager.ClearThreatIndicatorsForResolvedKing: Clearing indicators for {resolvedKingColor} king resolution");
-        
+
         // Get current threats for the resolved king (should be empty now)
         CheckThreatInfo resolvedThreats = CheckDetectionManager.Instance.GetCheckThreats(resolvedKingColor);
-        
+
         // Find indicators to remove: pieces that were attacking this king but no longer are
         List<ChessPiece> indicatorsToRemove = new List<ChessPiece>();
-        
+
         foreach (var kvp in activeAttackerIndicators)
         {
             ChessPiece attacker = kvp.Key;
-            
+
             // If this piece is no longer attacking the resolved king, remove its indicator
             if (!resolvedThreats.attackingPieces.Contains(attacker))
             {
-                // But check if this piece is still attacking the OTHER king
-                PieceColor otherKingColor = (resolvedKingColor == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-                CheckThreatInfo otherKingThreats = CheckDetectionManager.Instance.GetCheckThreats(otherKingColor);
-                
-                if (!otherKingThreats.attackingPieces.Contains(attacker))
+                // MULTI-PLAYER FIX: Check if this piece is still attacking ANY other king
+                bool stillAttackingAnyKing = false;
+
+                // Get all player colors that have kings in the game
+                List<PieceColor> allPlayers = new List<PieceColor>();
+                if (PlayerManager.Instance != null)
                 {
-                    // This piece is not attacking either king, remove its indicator
-                    indicatorsToRemove.Add(attacker);
-                    Debug.Log($"🟢 ThreatIndicatorManager.ClearThreatIndicatorsForResolvedKing: Removing indicator for {attacker.pieceColor} {attacker.pieceType} (no longer attacking any king)");
+                    allPlayers = PlayerManager.Instance.GetActivePlayers();
                 }
                 else
                 {
-                    Debug.Log($"🟢 ThreatIndicatorManager.ClearThreatIndicatorsForResolvedKing: Keeping indicator for {attacker.pieceColor} {attacker.pieceType} (still attacking {otherKingColor} king)");
+                    // Fallback for 2-player games
+                    allPlayers.Add(PieceColor.White);
+                    allPlayers.Add(PieceColor.Black);
+                }
+
+                // Check threats against all kings except the resolved one
+                foreach (PieceColor kingColor in allPlayers)
+                {
+                    if (kingColor == resolvedKingColor)
+                        continue; // Skip the king we already know is resolved
+
+                    CheckThreatInfo kingThreats = CheckDetectionManager.Instance.GetCheckThreats(kingColor);
+                    if (kingThreats.attackingPieces.Contains(attacker))
+                    {
+                        stillAttackingAnyKing = true;
+                        Debug.Log($"🟢 ThreatIndicatorManager.ClearThreatIndicatorsForResolvedKing: Keeping indicator for {attacker.pieceColor} {attacker.pieceType} (still attacking {kingColor} king)");
+                        break;
+                    }
+                }
+
+                if (!stillAttackingAnyKing)
+                {
+                    // This piece is not attacking any king, remove its indicator
+                    indicatorsToRemove.Add(attacker);
+                    Debug.Log($"🟢 ThreatIndicatorManager.ClearThreatIndicatorsForResolvedKing: Removing indicator for {attacker.pieceColor} {attacker.pieceType} (no longer attacking any king)");
                 }
             }
         }
@@ -477,50 +496,57 @@ public class ThreatIndicatorManager : MonoBehaviour
     /// <returns>Material for attacker indicators</returns>
     private Material CreateAttackerMaterial()
     {
-        Material material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-        
-        // Orange-red color to distinguish from pure red king indicator
-        Color attackerColor = new Color(1.0f, 0.4f, 0.0f, attackerIndicatorAlpha); // Orange-red
+        // Use same transparent shader chain as red check indicator for consistency
+        Shader shader = Shader.Find("Transparent/Diffuse");
+        if (shader == null)
+        {
+            shader = Shader.Find("Legacy Shaders/Transparent/Diffuse");
+            Debug.LogWarning("ThreatIndicatorManager: Transparent/Diffuse not found, using Legacy version");
+        }
+        if (shader == null)
+        {
+            shader = Shader.Find("Sprites/Default");
+            Debug.LogWarning("ThreatIndicatorManager: Legacy transparent shader not found, using Sprites/Default");
+        }
+
+        Material material = new Material(shader);
+
+        // Orange color to distinguish from pure red king indicator - match alpha to red indicator (0.6f)
+        Color attackerColor = new Color(1.0f, 0.4f, 0.0f, 0.6f); // Semi-transparent orange matching red indicator (60% opacity)
         material.color = attackerColor;
-        
-        // Set up transparency
-        material.SetFloat("_Surface", 1); // Transparent
-        material.SetFloat("_Blend", 0); // Alpha blend
-        material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        material.SetInt("_ZWrite", 0);
-        material.renderQueue = 3000;
-        
-        // Add some emission for visibility
-        material.SetFloat("_Smoothness", 0.8f);
-        material.SetFloat("_Metallic", 0.1f);
-        
+        material.renderQueue = 3000; // Render after other transparent objects
+
+        Debug.Log($"ThreatIndicatorManager: Created attacker material (ORANGE) using shader {shader.name}");
         return material;
     }
     
     /// <summary>
-    /// Create material for attack path lines - simplified version to avoid breaking gameplay
+    /// Create material for attack path lines - using same transparent shader as indicators for consistency
     /// </summary>
     /// <returns>Material for attack lines</returns>
     private Material CreateAttackLineMaterial()
     {
-        // SIMPLIFIED: Use standard URP Lit shader to avoid shader issues
-        Material material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-        
-        // ENHANCED: Bright red color for high visibility (keeping this improvement)
-        Color lineColor = new Color(1.0f, 0.0f, 0.0f, attackPathAlpha); // Bright red
+        // Use same transparent shader chain as orange/red indicators for consistency
+        Shader shader = Shader.Find("Transparent/Diffuse");
+        if (shader == null)
+        {
+            shader = Shader.Find("Legacy Shaders/Transparent/Diffuse");
+            Debug.LogWarning("ThreatIndicatorManager: Transparent/Diffuse not found, using Legacy version for attack lines");
+        }
+        if (shader == null)
+        {
+            shader = Shader.Find("Sprites/Default");
+            Debug.LogWarning("ThreatIndicatorManager: Legacy transparent shader not found, using Sprites/Default for attack lines");
+        }
+
+        Material material = new Material(shader);
+
+        // Bright red color matching check indicator style with 60% opacity for visibility
+        Color lineColor = new Color(1.0f, 0.0f, 0.0f, attackPathAlpha); // Bright red at 60% opacity
         material.color = lineColor;
-        
-        // Standard transparency setup (no complex emission or shader fallbacks)
-        material.SetFloat("_Surface", 1); // Transparent
-        material.SetFloat("_Blend", 0); // Alpha blend
-        material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        material.SetInt("_ZWrite", 0);
-        
-        // Standard render queue to avoid conflicts
-        material.renderQueue = 2900;
-        
+        material.renderQueue = 3000; // Render after other transparent objects, same as threat indicators
+
+        Debug.Log($"ThreatIndicatorManager: Created attack line material (RED) using shader {shader.name}");
         return material;
     }
     
@@ -559,25 +585,38 @@ public class ThreatIndicatorManager : MonoBehaviour
         {
             return;
         }
-        
-        // Get current threats for both kings
-        CheckThreatInfo whiteKingThreats = CheckDetectionManager.Instance.GetCheckThreats(PieceColor.White);
-        CheckThreatInfo blackKingThreats = CheckDetectionManager.Instance.GetCheckThreats(PieceColor.Black);
-        
+
+        // MULTI-PLAYER FIX: Get threats for ALL active players, not just White and Black
         // Create a set of valid attacker positions that should have attack paths
         HashSet<BoardPosition> validAttackerPositions = new HashSet<BoardPosition>();
-        
-        foreach (ChessPiece attacker in whiteKingThreats.attackingPieces)
+
+        // Get all player colors that have kings in the game
+        List<PieceColor> allPlayers = new List<PieceColor>();
+        if (PlayerManager.Instance != null)
         {
-            validAttackerPositions.Add(attacker.CurrentPosition);
+            allPlayers = PlayerManager.Instance.GetActivePlayers();
         }
-        
-        foreach (ChessPiece attacker in blackKingThreats.attackingPieces)
+        else
         {
-            validAttackerPositions.Add(attacker.CurrentPosition);
+            // Fallback for 2-player games
+            allPlayers.Add(PieceColor.White);
+            allPlayers.Add(PieceColor.Black);
         }
-        
-        Debug.Log($"🟢 ThreatIndicatorManager.ClearInvalidAttackPaths: Found {validAttackerPositions.Count} valid attacker positions");
+
+        // Gather all attacking pieces across all kings
+        foreach (PieceColor kingColor in allPlayers)
+        {
+            CheckThreatInfo kingThreats = CheckDetectionManager.Instance.GetCheckThreats(kingColor);
+            foreach (ChessPiece attacker in kingThreats.attackingPieces)
+            {
+                if (attacker != null)
+                {
+                    validAttackerPositions.Add(attacker.CurrentPosition);
+                }
+            }
+        }
+
+        Debug.Log($"🟢 ThreatIndicatorManager.ClearInvalidAttackPaths: Found {validAttackerPositions.Count} valid attacker positions across {allPlayers.Count} players");
         
         // Clear all attack paths since they don't have position tracking
         // This is a simpler approach: clear all and let them be recreated as needed
@@ -632,17 +671,22 @@ public class ThreatIndicatorManager : MonoBehaviour
             Debug.LogWarning("🟠 ThreatIndicatorManager.AnyPiecesMovingOnBoard: ChessBoard.Instance is null");
             return false;
         }
-        
-        // Iterate through all positions on the 4x4x4 board to check for moving pieces
-        for (int x = 0; x < 4; x++)
+
+        // Get dynamic board dimensions to support 4x4x4, 6x6x6, and 8x8x8 boards
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4
+
+        // Iterate through all positions on the board to check for moving pieces
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition position = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(position);
-                    
+
                     if (piece != null && piece.IsMoving)
                     {
                         Debug.Log($"🟠 ThreatIndicatorManager.AnyPiecesMovingOnBoard: {piece.pieceColor} {piece.pieceType} at {piece.CurrentPosition} is still moving - BLOCKING threat indicators");
@@ -651,7 +695,7 @@ public class ThreatIndicatorManager : MonoBehaviour
                 }
             }
         }
-        
+
         return false;
     }
     
@@ -663,16 +707,14 @@ public class ThreatIndicatorManager : MonoBehaviour
     private System.Collections.IEnumerator DelayedShowThreatIndicators(PieceColor kingColor)
     {
         Debug.Log($"🟠 ThreatIndicatorManager.DelayedShowThreatIndicators: ENTRY - waiting for {kingColor} king threats to stabilize");
-        
-        // Wait a frame to let any movement start
+
+        // REMOVED: Initial delays to match red check indicator speed
+        // Wait just one frame to allow position updates
         yield return null;
-        
+
         // Keep checking until all attacking pieces have stopped moving
         int maxWaitFrames = 180; // 3 seconds at 60fps safety limit (reduced for better responsiveness)
         int frameCount = 0;
-        
-        // Wait additional frames to ensure animations are fully complete
-        yield return new WaitForSeconds(0.1f); // 100ms initial delay
         
         while (frameCount < maxWaitFrames)
         {

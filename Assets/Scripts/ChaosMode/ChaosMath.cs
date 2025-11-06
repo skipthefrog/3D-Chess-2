@@ -13,17 +13,18 @@ public static class ChaosMath
     /// <param name="positions">List of positions to rotate</param>
     /// <param name="face">Which face of the cube</param>
     /// <param name="clockwise">Direction of rotation</param>
+    /// <param name="boardDimensions">Board size (4x4x4, 6x6x6, or 8x8x8)</param>
     /// <returns>Dictionary mapping old positions to new positions</returns>
-    public static Dictionary<BoardPosition, BoardPosition> RotateFacePositions(List<BoardPosition> positions, CubeFace face, bool clockwise)
+    public static Dictionary<BoardPosition, BoardPosition> RotateFacePositions(List<BoardPosition> positions, CubeFace face, bool clockwise, Vector3Int boardDimensions)
     {
         Dictionary<BoardPosition, BoardPosition> rotationMap = new Dictionary<BoardPosition, BoardPosition>();
-        
+
         foreach (BoardPosition pos in positions)
         {
-            BoardPosition newPos = RotateSinglePosition(pos, face, clockwise);
+            BoardPosition newPos = RotateSinglePosition(pos, face, clockwise, boardDimensions);
             rotationMap[pos] = newPos;
         }
-        
+
         return rotationMap;
     }
     
@@ -32,47 +33,48 @@ public static class ChaosMath
     /// </summary>
     /// <param name="positions">List of positions to rotate</param>
     /// <param name="axis">Rotation axis</param>
-    /// <param name="layer">Which layer (0-3)</param>
+    /// <param name="layer">Which layer (0 to boardSize-1)</param>
     /// <param name="clockwise">Direction of rotation</param>
+    /// <param name="boardDimensions">Board size (4x4x4, 6x6x6, or 8x8x8)</param>
     /// <returns>Dictionary mapping old positions to new positions</returns>
-    public static Dictionary<BoardPosition, BoardPosition> RotateLayerPositions(List<BoardPosition> positions, RotationAxis axis, int layer, bool clockwise)
+    public static Dictionary<BoardPosition, BoardPosition> RotateLayerPositions(List<BoardPosition> positions, RotationAxis axis, int layer, bool clockwise, Vector3Int boardDimensions)
     {
         Dictionary<BoardPosition, BoardPosition> rotationMap = new Dictionary<BoardPosition, BoardPosition>();
-        
+
         foreach (BoardPosition pos in positions)
         {
-            BoardPosition newPos = RotateLayerPosition(pos, axis, layer, clockwise);
+            BoardPosition newPos = RotateLayerPosition(pos, axis, layer, clockwise, boardDimensions);
             rotationMap[pos] = newPos;
         }
-        
+
         return rotationMap;
     }
     
     /// <summary>
     /// Rotate a single position on a cube face
     /// </summary>
-    private static BoardPosition RotateSinglePosition(BoardPosition pos, CubeFace face, bool clockwise)
+    private static BoardPosition RotateSinglePosition(BoardPosition pos, CubeFace face, bool clockwise, Vector3Int boardDimensions)
     {
         switch (face)
         {
             case CubeFace.Front: // Z = 0 plane, rotate in XY
-                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XY);
-                
-            case CubeFace.Back: // Z = 3 plane, rotate in XY
-                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XY);
-                
+                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XY, boardDimensions);
+
+            case CubeFace.Back: // Z = max plane, rotate in XY
+                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XY, boardDimensions);
+
             case CubeFace.Left: // X = 0 plane, rotate in YZ
-                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.YZ);
-                
-            case CubeFace.Right: // X = 3 plane, rotate in YZ
-                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.YZ);
-                
-            case CubeFace.Top: // Y = 3 plane, rotate in XZ
-                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XZ);
-                
+                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.YZ, boardDimensions);
+
+            case CubeFace.Right: // X = max plane, rotate in YZ
+                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.YZ, boardDimensions);
+
+            case CubeFace.Top: // Y = max plane, rotate in XZ
+                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XZ, boardDimensions);
+
             case CubeFace.Bottom: // Y = 0 plane, rotate in XZ
-                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XZ);
-                
+                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XZ, boardDimensions);
+
             default:
                 return pos; // No rotation
         }
@@ -81,19 +83,19 @@ public static class ChaosMath
     /// <summary>
     /// Rotate a single position in a layer around an axis
     /// </summary>
-    private static BoardPosition RotateLayerPosition(BoardPosition pos, RotationAxis axis, int layer, bool clockwise)
+    private static BoardPosition RotateLayerPosition(BoardPosition pos, RotationAxis axis, int layer, bool clockwise, Vector3Int boardDimensions)
     {
         switch (axis)
         {
             case RotationAxis.X: // Rotate around X axis (in YZ plane)
-                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.YZ);
-                
+                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.YZ, boardDimensions);
+
             case RotationAxis.Y: // Rotate around Y axis (in XZ plane)
-                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XZ);
-                
+                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XZ, boardDimensions);
+
             case RotationAxis.Z: // Rotate around Z axis (in XY plane)
-                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XY);
-                
+                return RotateInPlane(pos.x, pos.y, pos.z, clockwise, PlaneType.XY, boardDimensions);
+
             default:
                 return pos; // No rotation
         }
@@ -110,30 +112,32 @@ public static class ChaosMath
     }
     
     /// <summary>
-    /// Rotate coordinates in a 2D plane within the 4x4 grid
+    /// Rotate coordinates in a 2D plane within the board grid
     /// </summary>
-    private static BoardPosition RotateInPlane(int x, int y, int z, bool clockwise, PlaneType plane)
+    private static BoardPosition RotateInPlane(int x, int y, int z, bool clockwise, PlaneType plane, Vector3Int boardDimensions)
     {
+        int maxCoord = boardDimensions.x - 1; // Assuming cubic board (same size in all dimensions)
+
         switch (plane)
         {
             case PlaneType.XY: // Rotate X and Y, Z stays constant
                 {
-                    Vector2 rotated = Rotate2D(new Vector2(x, y), clockwise);
+                    Vector2 rotated = Rotate2D(new Vector2(x, y), clockwise, maxCoord);
                     return new BoardPosition(Mathf.RoundToInt(rotated.x), Mathf.RoundToInt(rotated.y), z);
                 }
-                
+
             case PlaneType.XZ: // Rotate X and Z, Y stays constant
                 {
-                    Vector2 rotated = Rotate2D(new Vector2(x, z), clockwise);
+                    Vector2 rotated = Rotate2D(new Vector2(x, z), clockwise, maxCoord);
                     return new BoardPosition(Mathf.RoundToInt(rotated.x), y, Mathf.RoundToInt(rotated.y));
                 }
-                
+
             case PlaneType.YZ: // Rotate Y and Z, X stays constant
                 {
-                    Vector2 rotated = Rotate2D(new Vector2(y, z), clockwise);
+                    Vector2 rotated = Rotate2D(new Vector2(y, z), clockwise, maxCoord);
                     return new BoardPosition(x, Mathf.RoundToInt(rotated.x), Mathf.RoundToInt(rotated.y));
                 }
-                
+
             default:
                 return new BoardPosition(x, y, z); // No rotation
         }
@@ -141,32 +145,33 @@ public static class ChaosMath
     
     /// <summary>
     /// Rotate a 2D point 90 degrees using discrete grid rotation (Rubik's cube style)
+    /// MULTI-BOARD SUPPORT: Works with 4x4x4, 6x6x6, and 8x8x8 boards
     /// </summary>
-    private static Vector2 Rotate2D(Vector2 point, bool clockwise)
+    private static Vector2 Rotate2D(Vector2 point, bool clockwise, int maxCoord)
     {
         // Convert to integer coordinates for discrete grid rotation
         int x = Mathf.RoundToInt(point.x);
         int y = Mathf.RoundToInt(point.y);
-        
-        // Discrete grid rotation for 4x4 grid (0-3 range)
+
+        // Discrete grid rotation using dynamic maxCoord (3 for 4x4x4, 5 for 6x6x6, 7 for 8x8x8)
         int newX, newY;
         if (clockwise)
         {
-            // 90° clockwise: (x, y) -> (y, 3-x)
+            // 90° clockwise: (x, y) -> (y, maxCoord-x)
             newX = y;
-            newY = 3 - x;
+            newY = maxCoord - x;
         }
         else
         {
-            // 90° counter-clockwise: (x, y) -> (3-y, x)
-            newX = 3 - y;
+            // 90° counter-clockwise: (x, y) -> (maxCoord-y, x)
+            newX = maxCoord - y;
             newY = x;
         }
-        
-        // Clamp to valid grid positions (0-3) as safety measure
-        newX = Mathf.Clamp(newX, 0, 3);
-        newY = Mathf.Clamp(newY, 0, 3);
-        
+
+        // Clamp to valid grid positions (0 to maxCoord) as safety measure
+        newX = Mathf.Clamp(newX, 0, maxCoord);
+        newY = Mathf.Clamp(newY, 0, maxCoord);
+
         return new Vector2(newX, newY);
     }
     

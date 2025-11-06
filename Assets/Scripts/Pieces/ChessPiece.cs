@@ -46,9 +46,9 @@ public abstract class ChessPiece : MonoBehaviour
     public Material blackMaterial;
     
     [Header("Animation Settings")]
-    public float userMoveSpeed = 2f;        // 0.5 second duration - clearly visible for human moves
-    public float aiMoveSpeed = 1.5f;        // 0.67 second duration - deliberate AI moves
-    public float placementSpeed = 3f;       // 0.33 second duration - faster for placement
+    public float userMoveSpeed = 1.33f;     // 0.75 second duration - clearly visible for human moves (33% slower)
+    public float aiMoveSpeed = 1.0f;        // 1.0 second duration - deliberate AI moves (33% slower)
+    public float placementSpeed = 2.0f;     // 0.5 second duration - faster for placement (33% slower)
     public AnimationCurve movementCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f); // Smooth easing curve
     public float liftHeight = 0.5f;         // How high to lift pieces during movement
     public bool useLiftAnimation = true;    // Whether to lift pieces during movement
@@ -146,34 +146,125 @@ public abstract class ChessPiece : MonoBehaviour
     {
         if (meshRenderer != null)
         {
-            Material targetMaterial = pieceColor == PieceColor.White ? whiteMaterial : blackMaterial;
+            Material targetMaterial = null;
+
+            // Check for assigned materials first (White and Black typically have materials assigned)
+            switch (pieceColor)
+            {
+                case PieceColor.White:
+                    targetMaterial = whiteMaterial;
+                    break;
+                case PieceColor.Black:
+                    targetMaterial = blackMaterial;
+                    break;
+                // Other colors (Green, Purple, Yellow, Orange) will use CreateDefaultMaterial()
+            }
+
+            // If no material assigned, create a default colored material
             if (targetMaterial == null)
             {
                 targetMaterial = CreateDefaultMaterial();
             }
+
             meshRenderer.material = targetMaterial;
         }
     }
     
     protected Material CreateDefaultMaterial()
     {
-        Material material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-        
-        if (pieceColor == PieceColor.White)
+        // Try URP Lit shader first, fallback to Standard if not available
+        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+        if (shader == null)
         {
-            // Bright white with slight off-white tint for better visibility
-            material.color = new Color(0.95f, 0.95f, 0.95f, 1f);
-            material.SetFloat("_Metallic", 0.1f);      // Slight metallic look
-            material.SetFloat("_Smoothness", 0.6f);    // Semi-glossy finish
+            shader = Shader.Find("Standard");
+            Debug.LogWarning("ChessPiece: URP Lit shader not found, using Standard shader");
         }
-        else
+
+        // If no shader found, use default Diffuse material
+        if (shader == null)
         {
-            // Dark gray instead of pure black for much better visibility
-            material.color = new Color(0.25f, 0.25f, 0.25f, 1f); // Dark gray instead of pure black
-            material.SetFloat("_Metallic", 0.2f);      // Slightly more metallic for distinction
-            material.SetFloat("_Smoothness", 0.4f);    // Less glossy than white for contrast
+            Debug.LogError("ChessPiece: No valid shader found, using Diffuse shader");
+            shader = Shader.Find("Diffuse");
         }
-        
+
+        Material material = new Material(shader);
+
+        // Set color and material properties based on piece color
+        switch (pieceColor)
+        {
+            case PieceColor.White:
+                // Bright white with slight off-white tint for better visibility
+                material.color = new Color(0.95f, 0.95f, 0.95f, 1f);
+                if (shader.name.Contains("Lit") || shader.name.Contains("Standard"))
+                {
+                    material.SetFloat("_Metallic", 0.1f);      // Slight metallic look
+                    material.SetFloat("_Smoothness", 0.6f);    // Semi-glossy finish
+                }
+                break;
+
+            case PieceColor.Black:
+                // Dark gray instead of pure black for much better visibility
+                material.color = new Color(0.25f, 0.25f, 0.25f, 1f);
+                if (shader.name.Contains("Lit") || shader.name.Contains("Standard"))
+                {
+                    material.SetFloat("_Metallic", 0.2f);      // Slightly more metallic for distinction
+                    material.SetFloat("_Smoothness", 0.4f);    // Less glossy than white for contrast
+                }
+                break;
+
+            case PieceColor.Green:
+                // Darker forest green for better contrast
+                material.color = new Color(0.15f, 0.5f, 0.15f, 1f);
+                if (shader.name.Contains("Lit") || shader.name.Contains("Standard"))
+                {
+                    material.SetFloat("_Metallic", 0.15f);
+                    material.SetFloat("_Smoothness", 0.5f);
+                }
+                break;
+
+            case PieceColor.Purple:
+                // Darker purple for better contrast
+                material.color = new Color(0.45f, 0.15f, 0.6f, 1f);
+                if (shader.name.Contains("Lit") || shader.name.Contains("Standard"))
+                {
+                    material.SetFloat("_Metallic", 0.15f);
+                    material.SetFloat("_Smoothness", 0.5f);
+                }
+                break;
+
+            case PieceColor.Yellow:
+                // Bright yellow for visibility
+                material.color = new Color(0.9f, 0.9f, 0.2f, 1f);
+                if (shader.name.Contains("Lit") || shader.name.Contains("Standard"))
+                {
+                    material.SetFloat("_Metallic", 0.1f);
+                    material.SetFloat("_Smoothness", 0.5f);
+                }
+                break;
+
+            case PieceColor.Orange:
+                // Bright orange for visibility
+                material.color = new Color(1.0f, 0.5f, 0.0f, 1f);
+                if (shader.name.Contains("Lit") || shader.name.Contains("Standard"))
+                {
+                    material.SetFloat("_Metallic", 0.15f);
+                    material.SetFloat("_Smoothness", 0.5f);
+                }
+                break;
+
+            default:
+                // Fallback to gray
+                material.color = new Color(0.5f, 0.5f, 0.5f, 1f);
+                if (shader.name.Contains("Lit") || shader.name.Contains("Standard"))
+                {
+                    material.SetFloat("_Metallic", 0.15f);
+                    material.SetFloat("_Smoothness", 0.5f);
+                }
+                break;
+        }
+
+        Debug.Log($"ChessPiece: Created default material for {pieceColor} piece using shader {shader.name}");
+
         return material;
     }
     
@@ -550,42 +641,108 @@ public abstract class ChessPiece : MonoBehaviour
     private GameObject selectionGlow;
     private GameObject capturableGlow;
     private GameObject checkIndicator;
-    
+    private Material originalMaterial; // Backup of original material for restoring when deselected
+
+    /// <summary>
+    /// Helper method to find a suitable shader with fallback
+    /// </summary>
+    private Shader FindShaderWithFallback()
+    {
+        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+        if (shader == null)
+        {
+            shader = Shader.Find("Standard");
+            if (shader == null)
+            {
+                shader = Shader.Find("Diffuse");
+            }
+        }
+        return shader;
+    }
+
     protected virtual void AddSelectionGlow()
     {
         if (selectionGlow != null) return; // Already has glow
-        
+
+        // TRANSPARENCY FIX: Make the piece itself transparent when selected
+        if (meshRenderer != null && meshRenderer.material != null)
+        {
+            // Store the original material for restoration
+            originalMaterial = meshRenderer.material;
+
+            // Use transparent shader for proper alpha blending (same as check indicators)
+            Shader transparentShader = Shader.Find("Transparent/Diffuse");
+            if (transparentShader == null)
+            {
+                transparentShader = Shader.Find("Legacy Shaders/Transparent/Diffuse");
+                Debug.LogWarning("ChessPiece: Transparent/Diffuse not found, using Legacy version");
+            }
+            if (transparentShader == null)
+            {
+                transparentShader = Shader.Find("Sprites/Default");
+                Debug.LogWarning("ChessPiece: Legacy transparent shader not found, using Sprites/Default");
+            }
+
+            // Create a transparent copy of the piece's material
+            Material transparentMaterial = new Material(transparentShader);
+
+            // Preserve the piece's original color but make it semi-transparent
+            Color originalColor = originalMaterial.color;
+            Color transparentColor = new Color(originalColor.r, originalColor.g, originalColor.b, 0.3f); // 30% opacity
+            transparentMaterial.color = transparentColor;
+            transparentMaterial.renderQueue = 3000; // Render after opaque objects
+
+            // Apply the transparent material to the piece
+            meshRenderer.material = transparentMaterial;
+
+            Debug.Log($"ChessPiece: Applied transparency to selected {pieceColor} {pieceType} (alpha: 0.3)");
+        }
+
         // Create a slightly larger sphere around the piece
         selectionGlow = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         selectionGlow.name = "SelectionGlow";
         selectionGlow.transform.SetParent(transform);
         selectionGlow.transform.localPosition = new Vector3(0, 1.05f, 0); // Same as piece center
         selectionGlow.transform.localScale = new Vector3(2.0f, 2.0f, 2.0f); // Moderately larger than piece
-        
+
         // Remove collider so it doesn't interfere with input
         Collider glowCollider = selectionGlow.GetComponent<Collider>();
         if (glowCollider != null)
         {
             DestroyImmediate(glowCollider);
         }
-        
-        // Create glowing material
+
+        // Create glowing material with shader fallback
         Renderer glowRenderer = selectionGlow.GetComponent<Renderer>();
-        Material glowMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        Shader shader = FindShaderWithFallback();
+        Material glowMaterial = new Material(shader);
         glowMaterial.color = new Color(1f, 1f, 0f, 0.2f); // More transparent yellow
-        glowMaterial.SetFloat("_Surface", 1); // Transparent
-        glowMaterial.SetFloat("_Blend", 0); // Alpha blend
-        glowMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        glowMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        glowMaterial.SetInt("_ZWrite", 0);
-        glowMaterial.renderQueue = 3000;
-        
+
+        // Only set these properties if using URP or Standard shader
+        if (shader.name.Contains("Lit") || shader.name.Contains("Standard"))
+        {
+            glowMaterial.SetFloat("_Surface", 1); // Transparent
+            glowMaterial.SetFloat("_Blend", 0); // Alpha blend
+            glowMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            glowMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            glowMaterial.SetInt("_ZWrite", 0);
+            glowMaterial.renderQueue = 3000;
+        }
+
         glowRenderer.material = glowMaterial;
-        
+
     }
     
     protected virtual void RemoveSelectionGlow()
     {
+        // TRANSPARENCY FIX: Restore the original opaque material
+        if (originalMaterial != null && meshRenderer != null)
+        {
+            meshRenderer.material = originalMaterial;
+            originalMaterial = null;
+            Debug.Log($"ChessPiece: Restored original material for deselected {pieceColor} {pieceType}");
+        }
+
         if (selectionGlow != null)
         {
             DestroyImmediate(selectionGlow);
@@ -599,40 +756,45 @@ public abstract class ChessPiece : MonoBehaviour
     public virtual void AddCapturableGlow()
     {
         if (capturableGlow != null) return; // Already has capturable glow
-        
+
         // Create a slightly larger sphere around the piece
         capturableGlow = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         capturableGlow.name = "CapturableGlow";
         capturableGlow.transform.SetParent(transform);
         capturableGlow.transform.localPosition = new Vector3(0, 1.05f, 0); // Same as piece center
         capturableGlow.transform.localScale = new Vector3(2.2f, 2.2f, 2.2f); // Slightly larger than selection
-        
+
         // Remove collider so it doesn't interfere with input
         Collider glowCollider = capturableGlow.GetComponent<Collider>();
         if (glowCollider != null)
         {
             DestroyImmediate(glowCollider);
         }
-        
-        // Create glowing blue material with emission
+
+        // Create glowing blue material with emission and shader fallback
         Renderer glowRenderer = capturableGlow.GetComponent<Renderer>();
-        Material glowMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        Shader shader = FindShaderWithFallback();
+        Material glowMaterial = new Material(shader);
         glowMaterial.color = new Color(0.3f, 0.6f, 1.0f, 0.3f); // Semi-transparent bright blue
-        
-        // Add emission for glow effect
-        glowMaterial.EnableKeyword("_EMISSION");
-        glowMaterial.SetColor("_EmissionColor", new Color(0.0f, 0.4f, 1.0f, 1.0f)); // Bright blue emission
-        
-        // Set transparency properties
-        glowMaterial.SetFloat("_Surface", 1); // Transparent
-        glowMaterial.SetFloat("_Blend", 0); // Alpha blend
-        glowMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        glowMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        glowMaterial.SetInt("_ZWrite", 0);
-        glowMaterial.renderQueue = 3000;
-        
+
+        // Only set these properties if using URP or Standard shader
+        if (shader.name.Contains("Lit") || shader.name.Contains("Standard"))
+        {
+            // Add emission for glow effect
+            glowMaterial.EnableKeyword("_EMISSION");
+            glowMaterial.SetColor("_EmissionColor", new Color(0.0f, 0.4f, 1.0f, 1.0f)); // Bright blue emission
+
+            // Set transparency properties
+            glowMaterial.SetFloat("_Surface", 1); // Transparent
+            glowMaterial.SetFloat("_Blend", 0); // Alpha blend
+            glowMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            glowMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            glowMaterial.SetInt("_ZWrite", 0);
+            glowMaterial.renderQueue = 3000;
+        }
+
         glowRenderer.material = glowMaterial;
-        
+
         Debug.Log($"🔵 AddCapturableGlow: Created blue glow for {pieceColor} {pieceType} at {CurrentPosition}");
     }
     
@@ -656,37 +818,46 @@ public abstract class ChessPiece : MonoBehaviour
     {
         if (pieceType != ChessPieceType.King) return; // Only kings show check indicators
         if (checkIndicator != null) return; // Already has indicator
-        
+
         // Create a red pulsing sphere around the king
         checkIndicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         checkIndicator.name = "CheckIndicator";
         checkIndicator.transform.SetParent(transform);
         checkIndicator.transform.localPosition = new Vector3(0, 1.05f, 0); // Same as piece center
         checkIndicator.transform.localScale = new Vector3(2.5f, 2.5f, 2.5f); // Larger than selection glow
-        
+
         // Remove collider so it doesn't interfere with input
         Collider checkCollider = checkIndicator.GetComponent<Collider>();
         if (checkCollider != null)
         {
             DestroyImmediate(checkCollider);
         }
-        
-        // Create pulsing red material
+
+        // Create pulsing red material using transparent shader
         Renderer checkRenderer = checkIndicator.GetComponent<Renderer>();
-        Material checkMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-        checkMaterial.color = new Color(1f, 0f, 0f, 0.3f); // Semi-transparent red
-        checkMaterial.SetFloat("_Surface", 1); // Transparent
-        checkMaterial.SetFloat("_Blend", 0); // Alpha blend
-        checkMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-        checkMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-        checkMaterial.SetInt("_ZWrite", 0);
+
+        // Use shaders that are BUILT for transparency, not opaque shaders with properties
+        Shader shader = Shader.Find("Transparent/Diffuse");
+        if (shader == null)
+        {
+            shader = Shader.Find("Legacy Shaders/Transparent/Diffuse");
+            Debug.LogWarning("ChessPiece: Transparent/Diffuse not found, using Legacy version");
+        }
+        if (shader == null)
+        {
+            shader = Shader.Find("Sprites/Default");
+            Debug.LogWarning("ChessPiece: Legacy transparent shader not found, using Sprites/Default");
+        }
+
+        Material checkMaterial = new Material(shader);
+        checkMaterial.color = new Color(1f, 0f, 0f, 0.6f); // Semi-transparent red for visibility (60% opacity)
         checkMaterial.renderQueue = 3001; // Render after selection glow
-        
+
         checkRenderer.material = checkMaterial;
-        
+
         // Add pulsing animation
         CheckIndicatorPulse pulseScript = checkIndicator.AddComponent<CheckIndicatorPulse>();
-        
+
         Debug.Log($"ChessPiece: Added check indicator to {pieceColor} king");
     }
     
@@ -797,17 +968,22 @@ public abstract class ChessPiece : MonoBehaviour
         if (!currentPosition.IsValid())
         {
             Debug.Log($"🔍 Searching board array for misplaced {pieceColor} {pieceType}...");
-            
+
+            // Get dynamic board dimensions
+            Vector3Int dims = BoardDimensionsManager.Instance != null
+                ? BoardDimensionsManager.Instance.GetDimensions()
+                : new Vector3Int(4, 4, 4);
+
             // Search entire board for this piece
-            for (int x = 0; x < 4; x++)
+            for (int x = 0; x < dims.x; x++)
             {
-                for (int y = 0; y < 4; y++)
+                for (int y = 0; y < dims.y; y++)
                 {
-                    for (int z = 0; z < 4; z++)
+                    for (int z = 0; z < dims.z; z++)
                     {
                         BoardPosition searchPos = new BoardPosition(x, y, z);
                         ChessPiece foundPiece = ChessBoard.Instance.GetPieceAt(searchPos);
-                        
+
                         if (foundPiece == this)
                         {
                             Debug.Log($"🎯 FOUND: {pieceColor} {pieceType} located at {searchPos} in board array");
@@ -818,7 +994,7 @@ public abstract class ChessPiece : MonoBehaviour
                     }
                 }
             }
-            
+
             Debug.LogError($"❌ REPAIR FAILED: {pieceColor} {pieceType} not found in board array");
             return false;
         }
@@ -871,17 +1047,22 @@ public abstract class ChessPiece : MonoBehaviour
         {
             return new BoardPosition(-1, -1, -1); // Invalid position
         }
-        
+
+        // Get dynamic board dimensions
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
         // Search the entire board array to find where this piece actually is
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < dims.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < dims.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < dims.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     ChessPiece pieceAtPosition = ChessBoard.Instance.GetPieceAt(pos);
-                    
+
                     if (pieceAtPosition == this)
                     {
                         Debug.Log($"🔍 FindActualBoardPosition: Found {pieceColor} {pieceType} at actual position {pos}");
@@ -890,11 +1071,35 @@ public abstract class ChessPiece : MonoBehaviour
                 }
             }
         }
-        
+
         Debug.LogWarning($"🔍 FindActualBoardPosition: {pieceColor} {pieceType} not found anywhere on the board!");
         return new BoardPosition(-1, -1, -1); // Invalid position
     }
     
+    /// <summary>
+    /// Convert this piece to a new color (for conquest system in multi-player games)
+    /// Changes the piece's color and updates its visual appearance
+    /// </summary>
+    public virtual void ConvertToColor(PieceColor newColor)
+    {
+        if (pieceColor == newColor)
+        {
+            Debug.LogWarning($"ChessPiece.ConvertToColor: {pieceColor} {pieceType} already has color {newColor}, skipping conversion");
+            return;
+        }
+
+        PieceColor oldColor = pieceColor;
+        pieceColor = newColor;
+
+        // Update visual appearance to match new color
+        ApplyMaterial();
+
+        Debug.Log($"🎨 CONQUEST: Converted {oldColor} {pieceType} at {currentPosition} to {newColor}");
+
+        // Fire event for UI updates (if needed in future)
+        // OnPieceColorChanged?.Invoke(this, oldColor, newColor);
+    }
+
     /// <summary>
     /// Check if this piece is currently in a tray (not on the board)
     /// </summary>
@@ -903,7 +1108,7 @@ public abstract class ChessPiece : MonoBehaviour
         // Check if piece is a child of any tray
         bool isInWhiteTray = PieceTray.WhiteTray != null && transform.IsChildOf(PieceTray.WhiteTray.transform);
         bool isInBlackTray = PieceTray.BlackTray != null && transform.IsChildOf(PieceTray.BlackTray.transform);
-        
+
         return isInWhiteTray || isInBlackTray;
     }
 }

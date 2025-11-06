@@ -7,12 +7,11 @@ using TMPro;
 /// </summary>
 public enum MenuStep
 {
-    MainMenu,           // Initial menu with New Game button
-    PlayerCount,        // Select number of players
-    AIPlayerCount,      // Select number of AI players
-    SideSelection,      // Select player positions (only when 0 < AI < total players)
-    BoardSize,          // Select board size
-    FinalConfirmation   // Review and confirm settings
+    MainMenu,           // Initial menu with New Local Game / New Online Game buttons
+    PlayerCount,        // Select number of players (2, 4, or 6)
+    SideSelection,      // Select player types for each position (Human or AI toggle per player)
+    BoardSize,          // Select board size with chaos mode and timed play options
+    FinalConfirmation   // Review and confirm all settings
 }
 
 /// <summary>
@@ -272,12 +271,22 @@ public class MainMenuController : MonoBehaviour
             Debug.LogWarning("MainMenuController: Already loading, ignoring start game request");
             return;
         }
-        
+
         Debug.Log($"MainMenuController: Starting game with configuration: {currentConfig}");
-        
+        Debug.Log($"🔍 TRACE: currentConfig.boardSize = {currentConfig.boardSize}");
+
+        // Sync legacy fields for 2-player compatibility
+        // The game code relies on whitePlayerType/blackPlayerType for 2-player games
+        if (currentConfig.playerCount == 2)
+        {
+            currentConfig.ApplyToLegacyFields();
+            Debug.Log($"Applied legacy fields: White={currentConfig.whitePlayerType}, Black={currentConfig.blackPlayerType}");
+        }
+
         // Load the game scene with current configuration
         if (SceneController.Instance != null)
         {
+            Debug.Log($"🔍 TRACE: About to call LoadGameScene with boardSize = {currentConfig.boardSize}");
             SceneController.Instance.LoadGameScene(currentConfig);
         }
         else
@@ -577,10 +586,7 @@ public class MainMenuController : MonoBehaviour
             
             CreateCompletePlayerCountPanel(mainContainer);
             Debug.Log("✅ Player count panel created successfully");
-            
-            CreateCompleteAICountPanel(mainContainer);
-            Debug.Log("✅ AI count panel created successfully");
-            
+
             CreateCompleteSideSelectionPanel(mainContainer);
             Debug.Log("✅ Side selection panel created successfully");
             
@@ -596,7 +602,6 @@ public class MainMenuController : MonoBehaviour
             // Hide all panels initially - they'll be shown by ShowStep
             if (mainMenuPanel) mainMenuPanel.SetActive(false);
             if (playerCountPanel) playerCountPanel.SetActive(false);
-            if (aiCountPanel) aiCountPanel.SetActive(false);
             if (sideSelectionPanel) sideSelectionPanel.SetActive(false);
             if (boardSizePanel) boardSizePanel.SetActive(false);
             if (confirmationPanel) confirmationPanel.SetActive(false);
@@ -708,85 +713,115 @@ public class MainMenuController : MonoBehaviour
     }
     
     /// <summary>
-    /// Create complete main menu panel with working New Game button
+    /// Create complete main menu panel with New Local Game and New Online Game buttons
     /// </summary>
     private void CreateCompleteMainMenuPanel(GameObject parent)
     {
         mainMenuPanel = new GameObject("MainMenuPanel");
         mainMenuPanel.transform.SetParent(parent.transform, false);
-        
+
         RectTransform panelRect = mainMenuPanel.AddComponent<RectTransform>();
         panelRect.anchorMin = new Vector2(0.15f, 0.25f);  // Better margins
         panelRect.anchorMax = new Vector2(0.85f, 0.8f);   // More space
         panelRect.sizeDelta = Vector2.zero;
         panelRect.anchoredPosition = Vector2.zero;
-        
+
         // Title with more space
         CreateUIText("Title", "3D Chess", mainMenuPanel, new Vector2(0, 0.75f), new Vector2(1, 0.95f), 32);
-        
+
         // Subtitle for clarity
         CreateUIText("Subtitle", "Welcome to 3D Chess", mainMenuPanel, new Vector2(0, 0.6f), new Vector2(1, 0.75f), 18);
-        
-        // New Game Button (this is the key button that must work!) - bigger and more prominent
-        newGameButton = CreateUIButton("NewGameButton", "New Game", mainMenuPanel, 
-                                     new Vector2(0.1f, 0.35f), new Vector2(0.9f, 0.55f),
+
+        // New Local Game Button - upper button
+        newGameButton = CreateUIButton("NewLocalGameButton", "New Local Game", mainMenuPanel,
+                                     new Vector2(0.1f, 0.42f), new Vector2(0.9f, 0.57f),
                                      () => {
-                                         Debug.Log("🎮 MainMenuController: New Game button clicked!");
+                                         Debug.Log("🎮 MainMenuController: New Local Game button clicked!");
                                          StartEnhancedFlow();
                                      });
-        
+
+        // New Online Game Button - middle button (placeholder for future feature)
+        Button newOnlineGameButton = CreateUIButton("NewOnlineGameButton", "New Online Game", mainMenuPanel,
+                                   new Vector2(0.1f, 0.27f), new Vector2(0.9f, 0.42f),
+                                   () => {
+                                       Debug.Log("🌐 MainMenuController: New Online Game button clicked!");
+                                       Debug.LogWarning("Online multiplayer not yet implemented - coming soon!");
+                                       // TODO: Implement online multiplayer flow
+                                   });
+
         // Exit Button - smaller and lower
         exitButton = CreateUIButton("ExitButton", "Exit", mainMenuPanel,
-                                   new Vector2(0.3f, 0.1f), new Vector2(0.7f, 0.25f),
+                                   new Vector2(0.3f, 0.1f), new Vector2(0.7f, 0.22f),
                                    () => {
                                        Debug.Log("🚪 MainMenuController: Exit button clicked!");
                                        QuitGame();
                                    });
-        
-        Debug.Log("🎨 MainMenuController: Main menu panel created with working buttons");
+
+        Debug.Log("🎨 MainMenuController: Main menu panel created with New Local Game, New Online Game, and Exit buttons");
     }
     
     /// <summary>
-    /// Create complete player count panel
+    /// Create complete player count panel with button-based selection (2, 4, or 6 players)
     /// </summary>
     private void CreateCompletePlayerCountPanel(GameObject parent)
     {
         playerCountPanel = new GameObject("PlayerCountPanel");
         playerCountPanel.transform.SetParent(parent.transform, false);
-        
+
         RectTransform panelRect = playerCountPanel.AddComponent<RectTransform>();
         panelRect.anchorMin = new Vector2(0.15f, 0.25f);  // Consistent margins
         panelRect.anchorMax = new Vector2(0.85f, 0.8f);   // Consistent height
         panelRect.sizeDelta = Vector2.zero;
         panelRect.anchoredPosition = Vector2.zero;
-        
-        // Current selection - more prominent
-        playerCountText = CreateUIText("PlayerCountText", "2 Players", playerCountPanel, new Vector2(0, 0.6f), new Vector2(1, 0.75f), 28);
-        playerCountText.color = new Color(1f, 0.8f, 0.2f, 1f); // Golden yellow
-        
-        
-        // Chaos Mode Toggle
-        CreateChaosToggle(playerCountPanel);
-        
-        // Timed Play Toggle  
-        CreateTimedPlayToggle(playerCountPanel);
-        
+
+        // Title
+        CreateUIText("Title", "Choose Number of Players", playerCountPanel, new Vector2(0, 0.75f), new Vector2(1, 0.9f), 24);
+
+        // Instructions
+        CreateUIText("Instructions", "Select how many players will participate", playerCountPanel, new Vector2(0, 0.65f), new Vector2(1, 0.75f), 14);
+
+        // 2 Players Button
+        Button twoPlayersButton = CreateUIButton("TwoPlayersButton", "2 Players", playerCountPanel,
+                                    new Vector2(0.1f, 0.5f), new Vector2(0.9f, 0.62f),
+                                    () => {
+                                        Debug.Log("🎮 MainMenuController: 2 Players selected");
+                                        OnPlayerCountSelected(2);
+                                    });
+
+        // 4 Players Button
+        Button fourPlayersButton = CreateUIButton("FourPlayersButton", "4 Players", playerCountPanel,
+                                    new Vector2(0.1f, 0.37f), new Vector2(0.9f, 0.49f),
+                                    () => {
+                                        Debug.Log("🎮 MainMenuController: 4 Players selected");
+                                        OnPlayerCountSelected(4);
+                                    });
+
+        // 6 Players Button
+        Button sixPlayersButton = CreateUIButton("SixPlayersButton", "6 Players", playerCountPanel,
+                                    new Vector2(0.1f, 0.24f), new Vector2(0.9f, 0.36f),
+                                    () => {
+                                        Debug.Log("🎮 MainMenuController: 6 Players selected");
+                                        OnPlayerCountSelected(6);
+                                    });
+
         // Navigation Buttons
         CreateNavigationButtons(playerCountPanel);
+
+        Debug.Log("🎨 MainMenuController: Player count panel created with 2/4/6 player buttons");
     }
     
     /// <summary>
-    /// Create chaos mode toggle for PlayerCount step
+    /// Create chaos mode toggle for BoardSize step
     /// </summary>
     private void CreateChaosToggle(GameObject parent)
     {
         // Create container for chaos toggle with clean name
         GameObject chaosContainer = new GameObject("ChaosContainer_v2");
         chaosContainer.transform.SetParent(parent.transform, false);
-        
+
         RectTransform containerRect = chaosContainer.AddComponent<RectTransform>();
-        containerRect.anchorMin = new Vector2(0.1f, 0.4f);   // Move higher to avoid timed play overlap  
-        containerRect.anchorMax = new Vector2(0.9f, 0.6f);   // Compact container for chaos controls only
+        containerRect.anchorMin = new Vector2(0.1f, 0.33f);   // Below board size buttons
+        containerRect.anchorMax = new Vector2(0.9f, 0.48f);   // Compact container for chaos controls
         containerRect.sizeDelta = Vector2.zero;
         containerRect.anchoredPosition = Vector2.zero;
         
@@ -853,17 +888,17 @@ public class MainMenuController : MonoBehaviour
     }
     
     /// <summary>
-    /// Create timed play toggle and slider for PlayerCount step
+    /// Create timed play toggle and slider for BoardSize step
     /// </summary>
     private void CreateTimedPlayToggle(GameObject parent)
     {
         // Create container for timed play toggle with clean name
         GameObject timedContainer = new GameObject("TimedPlayContainer_v2");
         timedContainer.transform.SetParent(parent.transform, false);
-        
+
         RectTransform containerRect = timedContainer.AddComponent<RectTransform>();
-        containerRect.anchorMin = new Vector2(0.1f, 0.2f);   // Sequential below chaos mode
-        containerRect.anchorMax = new Vector2(0.9f, 0.35f);  // Positioned above navigation buttons
+        containerRect.anchorMin = new Vector2(0.1f, 0.18f);   // Below chaos mode
+        containerRect.anchorMax = new Vector2(0.9f, 0.33f);  // Above board size text
         containerRect.sizeDelta = Vector2.zero;
         containerRect.anchoredPosition = Vector2.zero;
         
@@ -1320,7 +1355,198 @@ public class MainMenuController : MonoBehaviour
             chaosSliderText.text = $"Turns between rotations: {currentConfig.chaosTurnInterval}";
         }
     }
-    
+
+    /// <summary>
+    /// Handle player count selection
+    /// </summary>
+    private void OnPlayerCountSelected(int playerCount)
+    {
+        if (currentConfig != null)
+        {
+            currentConfig.playerCount = playerCount;
+            currentConfig.aiPlayerCount = 0; // Initialize to 0 (all players default to Human)
+            currentConfig.InitializePlayerTypes(); // Initialize playerTypes list with correct size (all Human)
+            Debug.Log($"MainMenuController: Player count set to {playerCount}, AI count initialized to 0");
+
+            // Update UI to show selection
+            if (playerCountText != null)
+            {
+                playerCountText.text = $"{playerCount} Players Selected";
+            }
+
+            // Enable next button now that a selection has been made
+            if (nextButton != null)
+            {
+                nextButton.interactable = true;
+            }
+        }
+        else
+        {
+            Debug.LogError("MainMenuController: Cannot set player count - currentConfig is null");
+        }
+    }
+
+    /// <summary>
+    /// Dynamically create player toggle buttons for side selection based on player count
+    /// </summary>
+    private void CreateDynamicPlayerButtons()
+    {
+        if (sideSelectionPanel == null || currentConfig == null)
+        {
+            Debug.LogWarning("CreateDynamicPlayerButtons: sideSelectionPanel or currentConfig is null");
+            return;
+        }
+
+        // Find the button container
+        Transform containerTransform = sideSelectionPanel.transform.Find("PlayerButtonContainer");
+        if (containerTransform == null)
+        {
+            Debug.LogError("CreateDynamicPlayerButtons: PlayerButtonContainer not found");
+            return;
+        }
+
+        // Clear existing buttons
+        foreach (Transform child in containerTransform)
+        {
+            Destroy(child.gameObject);
+        }
+
+        int playerCount = currentConfig.playerCount;
+        string[] colorNames = { "White", "Black", "Green", "Purple", "Yellow", "Orange" };
+        Color[] playerColors = {
+            new Color(0.95f, 0.95f, 0.95f, 1f),  // White
+            new Color(0.25f, 0.25f, 0.25f, 1f),  // Black
+            new Color(0.2f, 0.8f, 0.2f, 1f),     // Green
+            new Color(0.7f, 0.2f, 0.7f, 1f),     // Purple
+            new Color(0.9f, 0.9f, 0.2f, 1f),     // Yellow
+            new Color(1f, 0.5f, 0.1f, 1f)        // Orange
+        };
+
+        Debug.Log($"CreateDynamicPlayerButtons: Creating {playerCount} player buttons");
+
+        // Calculate button layout (2 columns for better space usage)
+        int buttonsPerRow = 2;
+        float buttonHeight = 0.54f;  // Tripled to 0.54f for comfortable two-line text display
+        float buttonSpacing = 0.03f;
+        float totalHeight = ((playerCount + 1) / buttonsPerRow) * (buttonHeight + buttonSpacing);
+        float startY = 0.5f + (totalHeight / 2f);
+
+        for (int i = 0; i < playerCount; i++)
+        {
+            int row = i / buttonsPerRow;
+            int col = i % buttonsPerRow;
+
+            float xMin = col == 0 ? 0.05f : 0.525f;
+            float xMax = col == 0 ? 0.475f : 0.95f;
+            float yMax = startY - (row * (buttonHeight + buttonSpacing));
+            float yMin = yMax - buttonHeight;
+
+            int playerIndex = i; // Capture for lambda
+            string colorName = i < colorNames.Length ? colorNames[i] : $"Player {i + 1}";
+            PlayerType currentType = i < currentConfig.playerTypes.Count ? currentConfig.playerTypes[i] : PlayerType.Human;
+            string buttonLabel = $"Player {i + 1} - {colorName}\n({(currentType == PlayerType.Human ? "Human" : "AI")})";
+
+            Color buttonColor = i < playerColors.Length ? playerColors[i] : Color.gray;
+
+            Button playerButton = CreateUIButton($"PlayerButton{i}", buttonLabel, containerTransform.gameObject,
+                new Vector2(xMin, yMin), new Vector2(xMax, yMax),
+                () => {
+                    TogglePlayerType(playerIndex);
+                },
+                buttonColor, buttonColor * 1.2f, buttonColor * 0.8f);
+
+            Debug.Log($"Created button for Player {i + 1} ({colorName}) at row {row}, col {col}");
+        }
+
+        Debug.Log($"✅ Created {playerCount} dynamic player buttons");
+    }
+
+    /// <summary>
+    /// Toggle a player between Human and AI
+    /// </summary>
+    private void TogglePlayerType(int playerIndex)
+    {
+        if (currentConfig == null || playerIndex >= currentConfig.playerTypes.Count)
+        {
+            Debug.LogWarning($"TogglePlayerType: Invalid player index {playerIndex}");
+            return;
+        }
+
+        // Toggle the player type
+        PlayerType newType = currentConfig.playerTypes[playerIndex] == PlayerType.Human ? PlayerType.Computer : PlayerType.Human;
+        currentConfig.SetPlayerTypeAtPosition(playerIndex, newType);
+
+        Debug.Log($"Toggled Player {playerIndex + 1} to {newType}");
+
+        // Recalculate AI player count to keep configuration consistent
+        int aiCount = 0;
+        foreach (var playerType in currentConfig.playerTypes)
+        {
+            if (playerType == PlayerType.Computer) aiCount++;
+        }
+        currentConfig.aiPlayerCount = aiCount;
+        Debug.Log($"AI player count updated to {aiCount}");
+
+        // Refresh the buttons to show updated state
+        CreateDynamicPlayerButtons();
+    }
+
+    /// <summary>
+    /// Validate and enable/disable board size buttons based on player count
+    /// 2 players: 4x4x4, 6x6x6, 8x8x8
+    /// 4 players: 6x6x6, 8x8x8
+    /// 6 players: 8x8x8 only
+    /// </summary>
+    private void ValidateBoardSizeOptions()
+    {
+        if (boardSizePanel == null || currentConfig == null)
+        {
+            Debug.LogWarning("ValidateBoardSizeOptions: boardSizePanel or currentConfig is null");
+            return;
+        }
+
+        int playerCount = currentConfig.playerCount;
+        Debug.Log($"ValidateBoardSizeOptions: Player count = {playerCount}");
+
+        // Find board size buttons
+        Transform button4x4 = boardSizePanel.transform.Find("4x4x4Button");
+        Transform button6x6 = boardSizePanel.transform.Find("6x6x6Button");
+        Transform button8x8 = boardSizePanel.transform.Find("8x8x8Button");
+
+        // 4x4x4: Only available for 2 players
+        if (button4x4 != null)
+        {
+            Button btn = button4x4.GetComponent<Button>();
+            if (btn != null)
+            {
+                btn.interactable = (playerCount == 2);
+                Debug.Log($"4x4x4 button: interactable={btn.interactable}");
+            }
+        }
+
+        // 6x6x6: Available for 2 or 4 players
+        if (button6x6 != null)
+        {
+            Button btn = button6x6.GetComponent<Button>();
+            if (btn != null)
+            {
+                btn.interactable = (playerCount == 2 || playerCount == 4);
+                Debug.Log($"6x6x6 button: interactable={btn.interactable}");
+            }
+        }
+
+        // 8x8x8: Available for all player counts (2, 4, 6)
+        if (button8x8 != null)
+        {
+            Button btn = button8x8.GetComponent<Button>();
+            if (btn != null)
+            {
+                btn.interactable = true;
+                Debug.Log($"8x8x8 button: interactable={btn.interactable}");
+            }
+        }
+    }
+
     /// <summary>
     /// Handle chaos mode toggle changes
     /// </summary>
@@ -1354,233 +1580,234 @@ public class MainMenuController : MonoBehaviour
     }
     
     /// <summary>
-    /// Create complete AI count panel with working slider
+    /// Create complete side selection panel for scalable player assignment
+    /// Dynamic UI that shows buttons for each player position, allowing toggle between Human/AI
     /// </summary>
-    private void CreateCompleteAICountPanel(GameObject parent)
+    private void CreateCompleteSideSelectionPanel(GameObject parent)
     {
-        aiCountPanel = new GameObject("AICountPanel");
-        aiCountPanel.transform.SetParent(parent.transform, false);
-        
-        RectTransform panelRect = aiCountPanel.AddComponent<RectTransform>();
+        sideSelectionPanel = new GameObject("SideSelectionPanel");
+        sideSelectionPanel.transform.SetParent(parent.transform, false);
+
+        RectTransform panelRect = sideSelectionPanel.AddComponent<RectTransform>();
         panelRect.anchorMin = new Vector2(0.15f, 0.25f);  // Consistent margins
         panelRect.anchorMax = new Vector2(0.85f, 0.8f);   // Consistent height
         panelRect.sizeDelta = Vector2.zero;
         panelRect.anchoredPosition = Vector2.zero;
-        
-        // Instructions
-        CreateUIText("Instructions", "How many players should be controlled by AI?", 
-                    aiCountPanel, new Vector2(0, 0.65f), new Vector2(1, 0.8f), 16);
-        
-        // Create AI count selection buttons instead of complex slider
-        Debug.Log("🔘 Creating AI count buttons with event handlers...");
-        CreateUIButton("0AIButton", "0 AI (Human vs Human)", aiCountPanel,
-                      new Vector2(0.1f, 0.5f), new Vector2(0.9f, 0.6f),
-                      () => {
-                          Debug.Log("🔘 0 AI button clicked!");
-                          OnAICountChanged(0);
-                      });
-                      
-        CreateUIButton("1AIButton", "1 AI (Human vs AI)", aiCountPanel,
-                      new Vector2(0.1f, 0.35f), new Vector2(0.9f, 0.45f),
-                      () => {
-                          Debug.Log("🔘 1 AI button clicked!");
-                          OnAICountChanged(1);
-                      });
-                      
-        CreateUIButton("2AIButton", "2 AI (AI vs AI)", aiCountPanel,
-                      new Vector2(0.1f, 0.2f), new Vector2(0.9f, 0.3f),
-                      () => {
-                          Debug.Log("🔘 2 AI button clicked!");
-                          OnAICountChanged(2);
-                      });
-        Debug.Log("🔘 AI count buttons created with event handlers");
-        
-        // Current selection display with better spacing (below the buttons)
-        aiCountText = CreateUIText("AICountText", "0 AI Players (Human vs Human)", aiCountPanel, new Vector2(0, 0.05f), new Vector2(1, 0.15f), 16);
-        aiCountText.color = new Color(1f, 0.8f, 0.2f, 1f); // Golden yellow
-        
-        // Navigation Buttons - positioned lower to avoid overlap with AI count text
-        CreateLoweredNavigationButtons(aiCountPanel);
-    }
-    
-    /// <summary>
-    /// Create complete side selection panel for scalable player assignment
-    /// </summary>
-    private void CreateCompleteSideSelectionPanel(GameObject parent)
-    {
-        // Create panel
-        sideSelectionPanel = new GameObject("SideSelectionPanel");
-        sideSelectionPanel.transform.SetParent(parent.transform, false);
-        sideSelectionPanel.AddComponent<RectTransform>();
-        RectTransform sideRT = sideSelectionPanel.GetComponent<RectTransform>();
-        sideRT.anchorMin = Vector2.zero;
-        sideRT.anchorMax = Vector2.one;
-        sideRT.offsetMin = Vector2.zero;
-        sideRT.offsetMax = Vector2.zero;
-        
-        // Title  
-        // MAJOR FIX: Reduced height from 0.2f (20%) to 0.06f (6%) to prevent overlap with buttons
-        // FORCE RECOMPILATION: Adding debug log to ensure constants are applied correctly
-        Debug.Log($"📐 SIMPLIFIED LAYOUT HIERARCHY:");
-        Debug.Log($"   95%+ Step Indicator: 'Step 3: Player Positions'");
-        Debug.Log($"   {SIDE_SELECTION_TITLE_Y * 100:F0}%  Title: 'Choose your side:'");
-        Debug.Log($"   {SIDE_SELECTION_BUTTONS_TOP_Y * 100:F0}%-{SIDE_SELECTION_BUTTONS_BOTTOM_Y * 100:F0}% Buttons: [Play as White] [Play as Black]");
-        Debug.Log($"🎨 SAFE POSITIONING: Creating title at Y position: {SIDE_SELECTION_TITLE_Y} (0.8 - below step indicator, above buttons)");
-        CreateUIText("SideSelectionTitle", "Choose your side:", sideSelectionPanel, new Vector2(0, SIDE_SELECTION_TITLE_Y), new Vector2(1, 0.06f), 24);
-        
-        // DIRECT POSITIONING OVERRIDE: Force exact position regardless of Unity anchor confusion
-        var titleObject = sideSelectionPanel.transform.Find("SideSelectionTitle");
-        if (titleObject != null)
-        {
-            RectTransform titleRect = titleObject.GetComponent<RectTransform>();
-            // Position from TOP of screen: 85%-91% from bottom = 9%-15% from top
-            titleRect.anchorMin = new Vector2(0, 0.85f);  // 85% from bottom
-            titleRect.anchorMax = new Vector2(1, 0.91f);  // 91% from bottom (6% height)
-            titleRect.anchoredPosition = Vector2.zero;    // No additional offset
-            titleRect.offsetMin = Vector2.zero;
-            titleRect.offsetMax = Vector2.zero;
-            Debug.Log($"🔧 FORCED 'Choose your side:' to exact screen position: 85%-91% from bottom (top 15% of screen)");
-            
-            // Log actual position for verification
-            Vector3[] corners = new Vector3[4];
-            titleRect.GetWorldCorners(corners);
-            Debug.Log($"🔍 'Choose your side:' actual world position: bottom={corners[0].y:F1}, top={corners[2].y:F1}");
-        }
-        else
-        {
-            Debug.LogError("🚨 Could not find SideSelectionTitle object for direct positioning!");
-        }
-        
-        // REMOVED: Instructions text - now using title "Choose your side:" instead
-        // The duplicate instructions are no longer needed since the title is self-explanatory
-        
-        // === SIMPLE 2-PLAYER UI ===
-        // Direct White/Black choice buttons (for 2-player Human vs AI)
-        // Positioned side-by-side with proper spacing and sizing
-        // White chess piece colors: bright white with subtle gray highlights
-        Color whiteNormal = new Color(0.95f, 0.95f, 0.95f, 1f);       // Bright white like chess piece
-        Color whiteHighlight = new Color(1f, 1f, 1f, 1f);             // Pure white on hover
-        Color whitePressed = new Color(0.85f, 0.85f, 0.85f, 1f);      // Slightly darker when pressed
-        
-        CreateUIButton("PlayAsWhiteButton", "Play as White", sideSelectionPanel, 
-            new Vector2(0.05f, SIDE_SELECTION_BUTTONS_BOTTOM_Y), new Vector2(0.45f, SIDE_SELECTION_BUTTONS_TOP_Y), () => OnPlayAsWhiteSelected(), 
-            whiteNormal, whiteHighlight, whitePressed);
-        
-        // Black chess piece colors: dark gray like chess piece (not pure black for visibility)
-        Color blackNormal = new Color(0.25f, 0.25f, 0.25f, 1f);       // Dark gray like chess piece
-        Color blackHighlight = new Color(0.35f, 0.35f, 0.35f, 1f);     // Lighter gray on hover
-        Color blackPressed = new Color(0.15f, 0.15f, 0.15f, 1f);       // Darker gray when pressed
-        
-        CreateUIButton("PlayAsBlackButton", "Play as Black", sideSelectionPanel, 
-            new Vector2(0.55f, SIDE_SELECTION_BUTTONS_BOTTOM_Y), new Vector2(0.95f, SIDE_SELECTION_BUTTONS_TOP_Y), () => OnPlayAsBlackSelected(),
-            blackNormal, blackHighlight, blackPressed);
-        
-        // === COMPLEX MULTI-PLAYER UI ===
-        // Human player position selection (for multi-players)
-        CreateUIButton("ChoosePositionButton", "Choose My Position", sideSelectionPanel, 
-            new Vector2(0.1f, 0.25f), new Vector2(0.35f, 0.15f), () => OnManualPositionSelection());
-        
-        // Random assignment button
-        CreateUIButton("RandomAssignButton", "Random Assignment", sideSelectionPanel, 
-            new Vector2(0.55f, 0.25f), new Vector2(0.35f, 0.15f), () => OnRandomAssignment());
-        
-        // Current assignment display
-        // LAYOUT FIX: Moved above buttons to prevent text overflow issues (15% → 30%)
-        CreateUIText("CurrentAssignmentTitle", "Current Assignment:", sideSelectionPanel, new Vector2(0, SIDE_SELECTION_ASSIGNMENT_TITLE_Y), new Vector2(1, 0.06f), 14);
-        
-        // Assignment details (will be updated by UpdateSideSelectionUI)
-        // LAYOUT FIX: Moved above buttons with smaller height to prevent overlap (5% → 22%)
-        CreateUIText("AssignmentDetails", "", sideSelectionPanel, new Vector2(0, SIDE_SELECTION_ASSIGNMENT_DETAILS_Y), new Vector2(1, 0.08f), 12);
-        
+
+        // Instructions (moved up to prevent overlap with player buttons)
+        CreateUIText("Instructions", "Click each player to toggle between Human and AI", sideSelectionPanel, new Vector2(0, 0.75f), new Vector2(1, 0.85f), 16);
+
+        // Container for player buttons (will be dynamically populated based on player count)
+        GameObject buttonContainer = new GameObject("PlayerButtonContainer");
+        buttonContainer.transform.SetParent(sideSelectionPanel.transform, false);
+
+        RectTransform containerRect = buttonContainer.AddComponent<RectTransform>();
+        containerRect.anchorMin = new Vector2(0.1f, 0.25f);
+        containerRect.anchorMax = new Vector2(0.9f, 0.6f);
+        containerRect.sizeDelta = Vector2.zero;
+        containerRect.anchoredPosition = Vector2.zero;
+
+        // Note: Player buttons will be created dynamically in ShowStep when player count is known
+        // This keeps the panel flexible for 2, 4, or 6 players
+
         // Navigation Buttons
-        CreateLoweredNavigationButtons(sideSelectionPanel);
+        CreateNavigationButtons(sideSelectionPanel);
+
+        Debug.Log("🎨 MainMenuController: Side selection panel created (buttons will be populated dynamically)");
     }
     
     /// <summary>
-    /// Create complete board size panel with working buttons
+    /// Create complete board size panel with board size buttons, chaos mode, and timed play toggles
     /// </summary>
     private void CreateCompleteBoardSizePanel(GameObject parent)
     {
         boardSizePanel = new GameObject("BoardSizePanel");
         boardSizePanel.transform.SetParent(parent.transform, false);
-        
+
         RectTransform panelRect = boardSizePanel.AddComponent<RectTransform>();
         panelRect.anchorMin = new Vector2(0.15f, 0.25f);  // Consistent margins
         panelRect.anchorMax = new Vector2(0.85f, 0.8f);   // Consistent height
         panelRect.sizeDelta = Vector2.zero;
         panelRect.anchoredPosition = Vector2.zero;
-        
+
+        // Title
+        CreateUIText("Title", "Board Configuration", boardSizePanel, new Vector2(0, 0.85f), new Vector2(1, 0.95f), 24);
+
         // Instructions
-        CreateUIText("Instructions", "Choose your board size:", 
-                    boardSizePanel, new Vector2(0, 0.7f), new Vector2(1, 0.8f), 16);
-        
-        // Board size buttons with better spacing
-        CreateUIButton("4x4x4Button", "4x4x4 (Compact)", boardSizePanel,
-                      new Vector2(0.1f, 0.55f), new Vector2(0.9f, 0.65f),
+        CreateUIText("Instructions", "Choose your board size:",
+                    boardSizePanel, new Vector2(0, 0.77f), new Vector2(1, 0.85f), 16);
+
+        // Board size buttons (will be shown/hidden dynamically based on player count)
+        // Note: Buttons will be validated and enabled/disabled in ShowStep
+        CreateUIButton("4x4x4Button", "4x4x4 (2 players only)", boardSizePanel,
+                      new Vector2(0.1f, 0.68f), new Vector2(0.9f, 0.76f),
                       () => {
                           Debug.Log("🎲 Board size selected: 4x4x4");
                           SetBoardSize(BoardSize.Small4x4x4);
                       });
-                      
-        CreateUIButton("6x6x6Button", "6x6x6 (Standard)", boardSizePanel,
-                      new Vector2(0.1f, 0.4f), new Vector2(0.9f, 0.5f),
+
+        CreateUIButton("6x6x6Button", "6x6x6 (2-4 players)", boardSizePanel,
+                      new Vector2(0.1f, 0.59f), new Vector2(0.9f, 0.67f),
                       () => {
                           Debug.Log("🎲 Board size selected: 6x6x6");
                           SetBoardSize(BoardSize.Medium6x6x6);
                       });
-                      
-        CreateUIButton("8x8x8Button", "8x8x8 (Large)", boardSizePanel,
-                      new Vector2(0.1f, 0.25f), new Vector2(0.9f, 0.35f),
+
+        CreateUIButton("8x8x8Button", "8x8x8 (2-6 players)", boardSizePanel,
+                      new Vector2(0.1f, 0.5f), new Vector2(0.9f, 0.58f),
                       () => {
                           Debug.Log("🎲 Board size selected: 8x8x8");
                           SetBoardSize(BoardSize.Large8x8x8);
                       });
-                      
-        // Current selection display with better spacing (below the buttons)
-        boardSizeText = CreateUIText("BoardSizeText", "⚠️ REQUIRED: Please select a board size", boardSizePanel, 
-                                   new Vector2(0, 0.05f), new Vector2(1, 0.15f), 16);
+
+        // Chaos Mode Toggle (moved from PlayerCount panel)
+        CreateChaosToggle(boardSizePanel);
+
+        // Timed Play Toggle (moved from PlayerCount panel)
+        CreateTimedPlayToggle(boardSizePanel);
+
+        // Current selection display
+        boardSizeText = CreateUIText("BoardSizeText", "⚠️ REQUIRED: Please select a board size", boardSizePanel,
+                                   new Vector2(0, 0.12f), new Vector2(1, 0.18f), 14);
         boardSizeText.color = new Color(1f, 0.6f, 0.0f, 1f); // Orange to indicate required
-        
+
         // Navigation Buttons
-        CreateLoweredNavigationButtons(boardSizePanel);
+        CreateNavigationButtons(boardSizePanel);
+
+        Debug.Log("🎨 MainMenuController: Board size panel created with chaos/timed toggles");
     }
     
     /// <summary>
-    /// Create complete confirmation panel
+    /// Create complete confirmation panel with enhanced summary and Confirm button
     /// </summary>
     private void CreateCompleteConfirmationPanel(GameObject parent)
     {
         confirmationPanel = new GameObject("ConfirmationPanel");
         confirmationPanel.transform.SetParent(parent.transform, false);
-        
+
         RectTransform panelRect = confirmationPanel.AddComponent<RectTransform>();
         panelRect.anchorMin = new Vector2(0.15f, 0.25f);  // Consistent margins
         panelRect.anchorMax = new Vector2(0.85f, 0.8f);   // Consistent height
         panelRect.sizeDelta = Vector2.zero;
         panelRect.anchoredPosition = Vector2.zero;
-        
-        // Step title
-        CreateUIText("Title", "Step 4: Review & Start", confirmationPanel, new Vector2(0, 0.8f), new Vector2(1, 0.95f), 24);
-        
+
+        // Title
+        CreateUIText("Title", "Confirm Game Setup", confirmationPanel, new Vector2(0, 0.85f), new Vector2(1, 0.95f), 24);
+
         // Instructions with better spacing
-        CreateUIText("Instructions", "Review your game configuration:", 
-                    confirmationPanel, new Vector2(0, 0.7f), new Vector2(1, 0.8f), 16);
-        
-        // Configuration summary with improved layout
-        confirmationText = CreateUIText("ConfigSummary", "Configuration will appear here", 
-                                      confirmationPanel, new Vector2(0, 0.45f), new Vector2(1, 0.7f), 18);
-        confirmationText.color = new Color(1f, 0.8f, 0.2f, 1f); // Golden yellow for consistency
-        
-        // Start Game button with better spacing
-        startGameButton = CreateUIButton("StartGameButton", "Start Game", confirmationPanel,
-                                       new Vector2(0.1f, 0.25f), new Vector2(0.9f, 0.4f),
+        CreateUIText("Instructions", "Review your game configuration:",
+                    confirmationPanel, new Vector2(0, 0.77f), new Vector2(1, 0.85f), 16);
+
+        // Create ScrollView for configuration summary to prevent overlap with buttons
+        GameObject scrollViewObj = new GameObject("ConfigScrollView");
+        scrollViewObj.transform.SetParent(confirmationPanel.transform, false);
+
+        RectTransform scrollRect = scrollViewObj.AddComponent<RectTransform>();
+        scrollRect.anchorMin = new Vector2(0, 0.35f);
+        scrollRect.anchorMax = new Vector2(1, 0.75f);
+        scrollRect.sizeDelta = Vector2.zero;
+        scrollRect.anchoredPosition = Vector2.zero;
+
+        // Add ScrollRect component
+        UnityEngine.UI.ScrollRect scrollComponent = scrollViewObj.AddComponent<UnityEngine.UI.ScrollRect>();
+        scrollComponent.horizontal = false;
+        scrollComponent.vertical = true;
+        scrollComponent.movementType = UnityEngine.UI.ScrollRect.MovementType.Clamped;
+        scrollComponent.scrollSensitivity = 20f;
+
+        // Create Viewport
+        GameObject viewportObj = new GameObject("Viewport");
+        viewportObj.transform.SetParent(scrollViewObj.transform, false);
+
+        RectTransform viewportRect = viewportObj.AddComponent<RectTransform>();
+        viewportRect.anchorMin = Vector2.zero;
+        viewportRect.anchorMax = Vector2.one;
+        viewportRect.sizeDelta = Vector2.zero;
+        viewportRect.anchoredPosition = Vector2.zero;
+
+        // Add Mask to viewport
+        UnityEngine.UI.Mask viewportMask = viewportObj.AddComponent<UnityEngine.UI.Mask>();
+        viewportMask.showMaskGraphic = false;
+
+        // Add Image component (required for Mask and visibility)
+        UnityEngine.UI.Image viewportImage = viewportObj.AddComponent<UnityEngine.UI.Image>();
+
+        // Create sprite for Image component (required by Unity UI)
+        Texture2D viewportTexture = new Texture2D(1, 1);
+        viewportTexture.SetPixel(0, 0, Color.white);
+        viewportTexture.Apply();
+        viewportImage.sprite = Sprite.Create(viewportTexture, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f));
+
+        // Set visible background color for the scroll area
+        viewportImage.color = new Color(0.15f, 0.15f, 0.15f, 0.95f); // Dark gray background
+
+        // Create Content container
+        GameObject contentObj = new GameObject("Content");
+        contentObj.transform.SetParent(viewportObj.transform, false);
+
+        RectTransform contentRect = contentObj.AddComponent<RectTransform>();
+        contentRect.anchorMin = new Vector2(0, 1);
+        contentRect.anchorMax = new Vector2(1, 1);
+        contentRect.pivot = new Vector2(0.5f, 1);
+        contentRect.sizeDelta = new Vector2(0, 300); // Initial height, will auto-expand
+        contentRect.anchoredPosition = Vector2.zero;
+
+        // Add ContentSizeFitter to auto-resize content based on text
+        UnityEngine.UI.ContentSizeFitter contentFitter = contentObj.AddComponent<UnityEngine.UI.ContentSizeFitter>();
+        contentFitter.verticalFit = UnityEngine.UI.ContentSizeFitter.FitMode.PreferredSize;
+
+        // Add VerticalLayoutGroup for proper text sizing
+        UnityEngine.UI.VerticalLayoutGroup contentLayout = contentObj.AddComponent<UnityEngine.UI.VerticalLayoutGroup>();
+        contentLayout.childForceExpandHeight = false;
+        contentLayout.childControlHeight = true;
+        contentLayout.childForceExpandWidth = true;
+        contentLayout.childAlignment = TextAnchor.UpperLeft;
+        contentLayout.padding = new RectOffset(10, 10, 10, 10);
+
+        // Configuration summary text (now inside scrollable content)
+        GameObject textObj = new GameObject("ConfigSummary");
+        textObj.transform.SetParent(contentObj.transform, false);
+
+        confirmationText = textObj.AddComponent<TMPro.TextMeshProUGUI>();
+        confirmationText.text = "Configuration will appear here";
+        confirmationText.fontSize = 14;
+        confirmationText.color = Color.white; // Pure white for maximum visibility against dark background
+        confirmationText.alignment = TMPro.TextAlignmentOptions.TopLeft; // Left-aligned for better readability
+        confirmationText.enableWordWrapping = true;
+
+        // Configure RectTransform for layout system (top-anchored works better with VerticalLayoutGroup)
+        RectTransform textRect = textObj.GetComponent<RectTransform>();
+        textRect.anchorMin = new Vector2(0f, 1f);
+        textRect.anchorMax = new Vector2(1f, 1f);
+        textRect.pivot = new Vector2(0.5f, 1f);
+        textRect.anchoredPosition = Vector2.zero;
+
+        // Add LayoutElement for proper height calculation
+        UnityEngine.UI.LayoutElement textLayout = textObj.AddComponent<UnityEngine.UI.LayoutElement>();
+        textLayout.preferredHeight = -1; // Auto-size based on content
+        textLayout.flexibleHeight = 1; // Allow flexible height
+
+        // Set ScrollRect references
+        scrollComponent.viewport = viewportRect;
+        scrollComponent.content = contentRect;
+
+        // Back button (left side)
+        backButton = CreateUIButton("BackButton", "Back", confirmationPanel,
+                                   new Vector2(0.1f, 0.15f), new Vector2(0.45f, 0.28f),
+                                   GoToPreviousStep);
+
+        // Confirm button (right side) - replaces "Next" as required
+        Button confirmButton = CreateUIButton("ConfirmButton", "Confirm", confirmationPanel,
+                                       new Vector2(0.55f, 0.15f), new Vector2(0.9f, 0.28f),
                                        () => {
-                                           Debug.Log("🚀 MainMenuController: Start Game button clicked!");
+                                           Debug.Log("🚀 MainMenuController: Confirm button clicked!");
                                            StartGame();
                                        });
-        
-        // Navigation Buttons - Back button for returning to previous steps
-        CreateLoweredNavigationButtons(confirmationPanel);
+
+        // Store confirm button reference for future use
+        startGameButton = confirmButton;
+
+        Debug.Log("🎨 MainMenuController: Confirmation panel created with Confirm button");
     }
     
     /// <summary>
@@ -1952,65 +2179,33 @@ public class MainMenuController : MonoBehaviour
                 
             case MenuStep.PlayerCount:
                 if (playerCountPanel) { playerCountPanel.SetActive(true); Debug.Log("  ✅ Player count panel shown"); }
-                UpdateStepIndicator("Step 1: Number of Players");
-                currentConfig.playerCount = 2; // Fixed at 2 for now
-                break;
-                
-            case MenuStep.AIPlayerCount:
-                if (aiCountPanel) { aiCountPanel.SetActive(true); Debug.Log("  ✅ AI count panel shown"); }
-                UpdateStepIndicator("Step 2: AI Players");
-                // Only reset if no AI count has been selected yet
-                if (!hasSelectedAICount)
+                UpdateStepIndicator("Step 1: Choose Number of Players");
+                // Disable next button until player count is selected
+                if (nextButton != null)
                 {
-                    Debug.Log($"🔄 ShowStep.AIPlayerCount: No AI count selected yet, showing selection prompt");
-                    
-                    // Show selection prompt
-                    if (aiCountText != null)
-                    {
-                        aiCountText.text = "⚠️ REQUIRED: Please click one of the buttons below to select AI count";
-                        aiCountText.color = new Color(1f, 0.6f, 0.0f, 1f); // Orange to indicate required
-                        Debug.Log("🔄 Set AI count text to selection prompt");
-                    }
-                    else
-                    {
-                        Debug.LogWarning("🔄 aiCountText is null in ShowStep");
-                    }
-                }
-                else
-                {
-                    Debug.Log($"🔄 ShowStep.AIPlayerCount: AI count already selected ({currentConfig.aiPlayerCount}), maintaining selection state");
-                    // UpdateAICountButtonHighlights() will be called below to restore highlights and text
-                }
-                
-                // Only restore button highlights if user has actually made a selection
-                if (aiCountPanel != null && currentConfig != null && hasSelectedAICount)
-                {
-                    UpdateAICountButtonHighlights(currentConfig.aiPlayerCount);
-                    Debug.Log("🔄 Restored AI count button highlights for user selection");
-                }
-                else if (aiCountPanel != null)
-                {
-                    Debug.Log("🔄 No AI count selection made yet, keeping buttons in default state");
+                    nextButton.interactable = (currentConfig.playerCount > 0);
                 }
                 break;
-                
+
             case MenuStep.SideSelection:
                 if (sideSelectionPanel) { sideSelectionPanel.SetActive(true); Debug.Log("  ✅ Side selection panel shown"); }
-                UpdateStepIndicator("Step 3: Player Positions");
-                UpdateSideSelectionUI();
+                UpdateStepIndicator("Step 2: Select Player Types");
+                // Dynamically create player toggle buttons based on player count
+                CreateDynamicPlayerButtons();
                 break;
                 
             case MenuStep.BoardSize:
                 if (boardSizePanel) { boardSizePanel.SetActive(true); Debug.Log("  ✅ Board size panel shown"); }
-                // Dynamic step numbering based on whether side selection was skipped
-                string stepNumber = currentConfig.NeedsSideSelection() ? "Step 4" : "Step 3";
-                UpdateStepIndicator($"{stepNumber}: Board Size");
-                
+                UpdateStepIndicator("Step 3: Board Configuration");
+
+                // Validate and enable/disable board size buttons based on player count
+                ValidateBoardSizeOptions();
+
                 // Only reset if no board size has been selected yet
                 if (!hasSelectedBoardSize)
                 {
                     Debug.Log($"🔄 ShowStep.BoardSize: No board size selected yet, showing selection prompt");
-                    
+
                     // Show selection prompt
                     if (boardSizeText != null)
                     {
@@ -2028,7 +2223,7 @@ public class MainMenuController : MonoBehaviour
                     Debug.Log($"🔄 ShowStep.BoardSize: Board size already selected ({currentConfig.boardSize}), maintaining selection state");
                     // UpdateBoardSizePanelSelection() will be called below to restore highlights and text
                 }
-                
+
                 // Only restore button highlights if user has actually made a selection
                 if (boardSizePanel != null && currentConfig != null && hasSelectedBoardSize)
                 {
@@ -2091,23 +2286,23 @@ public class MainMenuController : MonoBehaviour
             nextButton.gameObject.SetActive(showNext);
             
             // Provide visual feedback for required selections
-            if (showNext && currentStep == MenuStep.AIPlayerCount)
+            if (showNext && currentStep == MenuStep.PlayerCount)
             {
-                // Make Next button appear disabled if AI count not selected
-                nextButton.interactable = hasSelectedAICount;
-                
+                // Make Next button appear disabled if player count not selected
+                nextButton.interactable = (currentConfig.playerCount > 0);
+
                 // Update button appearance based on state
                 var buttonImage = nextButton.GetComponent<Image>();
                 if (buttonImage != null)
                 {
-                    buttonImage.color = hasSelectedAICount ? Color.white : new Color(0.5f, 0.5f, 0.5f, 0.8f);
+                    buttonImage.color = (currentConfig.playerCount > 0) ? Color.white : new Color(0.5f, 0.5f, 0.5f, 0.8f);
                 }
-                
+
                 // Update button text to provide guidance
                 var buttonText = nextButton.GetComponentInChildren<TextMeshProUGUI>();
                 if (buttonText != null)
                 {
-                    buttonText.text = hasSelectedAICount ? "Next" : "Select AI Count First";
+                    buttonText.text = (currentConfig.playerCount > 0) ? "Next" : "Select Player Count First";
                 }
             }
             else if (showNext)
@@ -2117,7 +2312,7 @@ public class MainMenuController : MonoBehaviour
                 var buttonImage = nextButton.GetComponent<Image>();
                 if (buttonImage != null)
                 {
-                    buttonImage.color = Color.white;
+                    buttonImage.color = new Color(0.2f, 0.4f, 0.8f, 1.0f); // Blue - matches normalColor from CreateUIButton
                 }
                 var buttonText = nextButton.GetComponentInChildren<TextMeshProUGUI>();
                 if (buttonText != null)
@@ -2149,22 +2344,13 @@ public class MainMenuController : MonoBehaviour
         MenuStep nextStep = currentStep switch
         {
             MenuStep.MainMenu => MenuStep.PlayerCount,
-            MenuStep.PlayerCount => MenuStep.AIPlayerCount,
-            MenuStep.AIPlayerCount => GetNextStepAfterAI(),
+            MenuStep.PlayerCount => MenuStep.SideSelection,
             MenuStep.SideSelection => MenuStep.BoardSize,
             MenuStep.BoardSize => MenuStep.FinalConfirmation,
             _ => currentStep
         };
-        
+
         Debug.Log($"🚀 Determined next step: {currentStep} → {nextStep}");
-        
-        if (currentStep == MenuStep.AIPlayerCount)
-        {
-            Debug.Log($"🚀 Special handling for AI count step:");
-            Debug.Log($"🚀   - NeedsSideSelection: {currentConfig.NeedsSideSelection()}");
-            Debug.Log($"🚀   - aiPlayerCount: {currentConfig.aiPlayerCount}");
-            Debug.Log($"🚀   - playerCount: {currentConfig.playerCount}");
-        }
         
         ShowStep(nextStep);
         Debug.Log($"🚀 MainMenuController.GoToNextStep: EXIT - transitioned to {nextStep}");
@@ -2179,49 +2365,24 @@ public class MainMenuController : MonoBehaviour
         
         switch (currentStep)
         {
-            case MenuStep.AIPlayerCount:
-                Debug.Log($"🔍 AI Count validation - hasSelectedAICount={hasSelectedAICount}, aiPlayerCount={currentConfig.aiPlayerCount}");
-                
-                // Primary validation: check the explicit selection flag
-                if (!hasSelectedAICount)
+            case MenuStep.PlayerCount:
+                Debug.Log($"🔍 Player Count validation - playerCount={currentConfig.playerCount}");
+                if (currentConfig.playerCount <= 0)
                 {
-                    Debug.LogWarning("🔍 ❌ Cannot proceed - AI count not selected (hasSelectedAICount=false)");
-                    Debug.LogWarning("🔍 User must explicitly select an AI count option to proceed");
-                    ShowAICountSelectionRequired();
+                    Debug.LogWarning("🔍 ❌ Cannot proceed - Player count not selected");
                     return false;
                 }
-                Debug.Log("🔍 ✅ AI Count validation passed");
+                Debug.Log("🔍 ✅ Player Count validation passed");
                 break;
-                
+
             case MenuStep.SideSelection:
-                Debug.Log($"🔍 Side Selection validation - playerCount={currentConfig.playerCount}, aiPlayerCount={currentConfig.aiPlayerCount}");
-                
-                // For 2-player Human vs AI, validate that sides have been assigned
-                if (currentConfig.playerCount == 2 && currentConfig.aiPlayerCount == 1)
-                {
-                    bool hasValidAssignment = (currentConfig.whitePlayerType == PlayerType.Human && currentConfig.blackPlayerType == PlayerType.Computer) ||
-                                            (currentConfig.whitePlayerType == PlayerType.Computer && currentConfig.blackPlayerType == PlayerType.Human);
-                    
-                    if (!hasValidAssignment)
-                    {
-                        Debug.LogWarning("🔍 ❌ Cannot proceed - Side selection not made for Human vs AI game");
-                        Debug.LogWarning("🔍 User must select White or Black to proceed");
-                        ShowSideSelectionRequired();
-                        return false;
-                    }
-                    Debug.Log($"🔍 ✅ Side Selection validation passed - Human: {(currentConfig.whitePlayerType == PlayerType.Human ? "White" : "Black")}");
-                }
-                else
-                {
-                    // For other scenarios, validate using playerTypes array
-                    if (!currentConfig.ValidateAssignment())
-                    {
-                        Debug.LogWarning("🔍 ❌ Cannot proceed - Invalid player type assignment");
-                        ShowSideSelectionRequired();
-                        return false;
-                    }
-                    Debug.Log("🔍 ✅ Side Selection validation passed for multi-player scenario");
-                }
+                Debug.Log($"🔍 Side Selection validation - playerCount={currentConfig.playerCount}");
+
+                // No validation needed - players can proceed with any combination
+                // All players default to Human and can be toggled to AI
+                // The new flow allows free selection without restrictions
+                // Any combination is valid (all Human, all AI, or mixed)
+                Debug.Log("🔍 ✅ Side Selection validation passed - free selection allowed");
                 break;
                 
             case MenuStep.BoardSize:
@@ -2333,45 +2494,6 @@ public class MainMenuController : MonoBehaviour
     }
     
     /// <summary>
-    /// Determine the next step after AI player count selection
-    /// </summary>
-    private MenuStep GetNextStepAfterAI()
-    {
-        // Initialize player types if needed
-        if (currentConfig.playerTypes.Count != currentConfig.playerCount)
-        {
-            currentConfig.InitializePlayerTypes();
-        }
-        
-        // If side selection is needed (mixed AI/human), go to side selection
-        if (currentConfig.NeedsSideSelection())
-        {
-            return MenuStep.SideSelection;
-        }
-        
-        // Otherwise, auto-assign and skip to board size
-        if (currentConfig.aiPlayerCount == 0)
-        {
-            // All human players
-            for (int i = 0; i < currentConfig.playerCount; i++)
-            {
-                currentConfig.SetPlayerTypeAtPosition(i, PlayerType.Human);
-            }
-        }
-        else if (currentConfig.aiPlayerCount == currentConfig.playerCount)
-        {
-            // All AI players
-            for (int i = 0; i < currentConfig.playerCount; i++)
-            {
-                currentConfig.SetPlayerTypeAtPosition(i, PlayerType.Computer);
-            }
-        }
-        
-        currentConfig.ApplyToLegacyFields();
-        return MenuStep.BoardSize;
-    }
-    
-    /// <summary>
     /// Go to previous step in the enhanced flow
     /// </summary>
     public void GoToPreviousStep()
@@ -2379,29 +2501,13 @@ public class MainMenuController : MonoBehaviour
         MenuStep previousStep = currentStep switch
         {
             MenuStep.PlayerCount => MenuStep.MainMenu,
-            MenuStep.AIPlayerCount => MenuStep.PlayerCount,
-            MenuStep.SideSelection => MenuStep.AIPlayerCount,
-            MenuStep.BoardSize => GetPreviousStepBeforeBoard(),
+            MenuStep.SideSelection => MenuStep.PlayerCount,
+            MenuStep.BoardSize => MenuStep.SideSelection,
             MenuStep.FinalConfirmation => MenuStep.BoardSize,
             _ => MenuStep.MainMenu
         };
-        
+
         ShowStep(previousStep);
-    }
-    
-    /// <summary>
-    /// Determine the previous step before board size selection
-    /// </summary>
-    private MenuStep GetPreviousStepBeforeBoard()
-    {
-        // If we have side selection in the flow, go back to it
-        if (currentConfig.NeedsSideSelection())
-        {
-            return MenuStep.SideSelection;
-        }
-        
-        // Otherwise, go back to AI player count
-        return MenuStep.AIPlayerCount;
     }
     
     /// <summary>
@@ -2422,20 +2528,42 @@ public class MainMenuController : MonoBehaviour
         if (aiCount == 0)
         {
             // All human - can assign immediately since no choice needed
+            currentConfig.InitializePlayerTypes(); // Initialize list with all Human
             currentConfig.whitePlayerType = PlayerType.Human;
             currentConfig.blackPlayerType = PlayerType.Human;
-            Debug.Log("🎯 Set player types: Human vs Human");
+            Debug.Log("🎯 Set player types: All Human");
         }
         else if (aiCount == currentConfig.playerCount)
         {
             // All AI - can assign immediately since no choice needed
-            currentConfig.whitePlayerType = PlayerType.Computer;
-            currentConfig.blackPlayerType = PlayerType.Computer;
-            Debug.Log("🎯 Set player types: AI vs AI");
+            currentConfig.InitializePlayerTypes(); // Initialize list first
+
+            // Set all players to AI in the playerTypes list
+            for (int i = 0; i < currentConfig.playerCount; i++)
+            {
+                currentConfig.playerTypes[i] = PlayerType.Computer;
+                Debug.Log($"🎯 MainMenuController: Set playerTypes[{i}] = Computer");
+            }
+
+            // Also update legacy fields for 2-player compatibility
+            currentConfig.ApplyToLegacyFields();
+
+            Debug.Log($"🎯 Set player types: All {currentConfig.playerCount} players are AI");
+            Debug.Log($"🎯 DEBUG: playerTypes.Count = {currentConfig.playerTypes.Count}");
+            for (int i = 0; i < currentConfig.playerTypes.Count; i++)
+            {
+                Debug.Log($"🎯 DEBUG: playerTypes[{i}] = {currentConfig.playerTypes[i]}");
+            }
         }
         else
         {
             // Mixed human/AI - assignment will be handled by side selection step
+            // Initialize the list if not already done
+            if (currentConfig.playerTypes.Count != currentConfig.playerCount)
+            {
+                currentConfig.InitializePlayerTypes();
+            }
+
             Debug.Log($"🎯 Mixed human/AI configuration ({aiCount} AI, {currentConfig.playerCount - aiCount} human) - side selection required");
             // Do not set whitePlayerType/blackPlayerType here - let user choose in side selection
         }
@@ -2537,18 +2665,68 @@ public class MainMenuController : MonoBehaviour
     {
         if (confirmationText != null && currentConfig != null)
         {
-            string summary = $"Players: {currentConfig.GetPlayerSetupDescription()}\n";
-            summary += $"Board: {currentConfig.GetBoardSizeDescription()}\n";
-            summary += $"AI Difficulty: {currentConfig.aiDifficulty}\n";
+            string summary = "═══════════════════════════════════\n";
+            summary += "GAME CONFIGURATION\n";
+            summary += "═══════════════════════════════════\n\n";
+
+            // Player count
+            summary += $"• Player Count: {currentConfig.playerCount} players\n\n";
+
+            // Player types (show each player's type)
+            summary += "• Player Types:\n";
+            string[] colorNames = { "White", "Black", "Green", "Purple", "Yellow", "Orange" };
+            for (int i = 0; i < currentConfig.playerCount && i < currentConfig.playerTypes.Count; i++)
+            {
+                string playerType = currentConfig.playerTypes[i] == PlayerType.Human ? "Human" : "AI";
+                summary += $"  Player {i + 1} ({colorNames[i]}): {playerType}\n";
+            }
+            summary += "\n";
+
+            // Board size
+            string boardDesc = currentConfig.boardSize switch
+            {
+                BoardSize.Small4x4x4 => "4x4x4 (Compact)",
+                BoardSize.Medium6x6x6 => "6x6x6 (Standard)",
+                BoardSize.Large8x8x8 => "8x8x8 (Large)",
+                _ => "Not selected"
+            };
+            summary += $"• Board Size: {boardDesc}\n\n";
+
+            // AI Difficulty (if any AI players)
+            int aiCount = 0;
+            foreach (var playerType in currentConfig.playerTypes)
+            {
+                if (playerType == PlayerType.Computer) aiCount++;
+            }
+            if (aiCount > 0)
+            {
+                summary += $"• AI Difficulty: {currentConfig.aiDifficulty}\n\n";
+            }
+
+            // Chaos Mode
             if (currentConfig.enableChaosMode)
             {
-                summary += $"Chaos Mode: Enabled (Every {currentConfig.chaosTurnInterval} turns)";
+                summary += $"• Chaos Mode: ENABLED\n";
+                summary += $"  (Board rotates every {currentConfig.chaosTurnInterval} turns)\n\n";
             }
             else
             {
-                summary += "Chaos Mode: Disabled";
+                summary += "• Chaos Mode: Disabled\n\n";
             }
-            
+
+            // Timed Play
+            if (currentConfig.enableTimedPlay)
+            {
+                summary += $"• Timed Play: ENABLED\n";
+                summary += $"  ({currentConfig.timePerPlayerMinutes} minutes per player)\n\n";
+            }
+            else
+            {
+                summary += "• Timed Play: Disabled\n\n";
+            }
+
+            summary += "═══════════════════════════════════";
+
             confirmationText.text = summary;
         }
     }

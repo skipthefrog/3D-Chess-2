@@ -20,8 +20,12 @@ public static class SceneBootstrap
     {
         Debug.Log("🚀 SceneBootstrap.InitializeOnLoad: CALLED - Bootstrap starting up!");
         Debug.Log($"🚀 SceneBootstrap: Unity time={Time.time}");
-        
-        try 
+
+        // Create essential managers early before scene loading
+        CreateBoardDimensionsManager();
+        CreatePlayerManager();
+
+        try
         {
             string currentSceneName = SceneManager.GetActiveScene().name;
             Debug.Log($"🚀 SceneBootstrap: Current scene at bootstrap: '{currentSceneName}'");
@@ -79,5 +83,29 @@ public static class SceneBootstrap
         {
             Debug.Log("✅ SceneBootstrap: Successfully in MainMenu scene after bootstrap");
         }
+    }
+
+    /// <summary>
+    /// Create BoardDimensionsManager early in the application lifecycle
+    /// This ensures it exists before SceneController tries to configure board size
+    /// </summary>
+    private static void CreateBoardDimensionsManager()
+    {
+        Debug.Log("🎲 SceneBootstrap: Creating BoardDimensionsManager...");
+        GameObject boardDimensionsObject = new GameObject("Board Dimensions Manager");
+        boardDimensionsObject.AddComponent<BoardDimensionsManager>();
+        Debug.Log("🎲 SceneBootstrap: BoardDimensionsManager created successfully");
+    }
+
+    /// <summary>
+    /// Create PlayerManager early in the application lifecycle
+    /// This ensures it exists before TurnManager tries to get player types
+    /// </summary>
+    private static void CreatePlayerManager()
+    {
+        Debug.Log("🎮 SceneBootstrap: Creating PlayerManager...");
+        GameObject playerManagerObject = new GameObject("Player Manager");
+        playerManagerObject.AddComponent<PlayerManager>();
+        Debug.Log("🎮 SceneBootstrap: PlayerManager created successfully");
     }
 }

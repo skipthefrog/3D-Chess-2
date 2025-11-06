@@ -10,8 +10,8 @@ public class CheckIndicatorPulse : MonoBehaviour
     public float pulseSpeed = 2f;
     public float minScale = 2.0f;
     public float maxScale = 3.0f;
-    public float minAlpha = 0.2f;
-    public float maxAlpha = 0.5f;
+    public float minAlpha = 0.05f;
+    public float maxAlpha = 0.15f;
     
     private Renderer pulseRenderer;
     private Material pulseMaterial;

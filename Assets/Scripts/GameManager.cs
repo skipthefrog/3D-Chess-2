@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class GameManager : MonoBehaviour
@@ -85,7 +86,13 @@ public class GameManager : MonoBehaviour
         // Create piece trays (they will automatically parent themselves to Board Rotator)
         Debug.Log("GameManager: About to call SetupPieceTrays()...");
         SetupPieceTrays();
-        Debug.Log($"GameManager: SetupPieceTrays() completed. Static references - WhiteTray: {(PieceTray.WhiteTray != null ? PieceTray.WhiteTray.name : "NULL")}, BlackTray: {(PieceTray.BlackTray != null ? PieceTray.BlackTray.name : "NULL")}");
+        Debug.Log($"GameManager: SetupPieceTrays() completed. Tray status:");
+        Debug.Log($"  WhiteTray: {(PieceTray.WhiteTray != null ? PieceTray.WhiteTray.name : "NULL")}");
+        Debug.Log($"  BlackTray: {(PieceTray.BlackTray != null ? PieceTray.BlackTray.name : "NULL")}");
+        Debug.Log($"  GreenTray: {(PieceTray.GreenTray != null ? PieceTray.GreenTray.name : "NULL")}");
+        Debug.Log($"  PurpleTray: {(PieceTray.PurpleTray != null ? PieceTray.PurpleTray.name : "NULL")}");
+        Debug.Log($"  YellowTray: {(PieceTray.YellowTray != null ? PieceTray.YellowTray.name : "NULL")}");
+        Debug.Log($"  OrangeTray: {(PieceTray.OrangeTray != null ? PieceTray.OrangeTray.name : "NULL")}");
         
         // Create placement manager
         Debug.Log("🎯 GameManager: About to call SetupPlacementManager()...");
@@ -155,7 +162,10 @@ public class GameManager : MonoBehaviour
         
         // Create game menu UI (replaces standalone forfeit/draw buttons)
         SetupGameMenuUI();
-        
+
+        // Create coordinate labels UI
+        SetupCoordinateLabelsUI();
+
         Debug.Log("GameManager: Game initialization complete!");
         
         // ANTI-REPETITION: Clear any existing game history for new game
@@ -266,16 +276,20 @@ public class GameManager : MonoBehaviour
         Debug.Log($"AIPlayer exists: {(AIPlayer.Instance != null)}");
         Debug.Log($"PlacementManager exists: {(PlacementManager.Instance != null)}");
         
-        // Check tray states
-        if (PieceTray.WhiteTray != null)
+        // Check tray states for all player colors
+        PieceColor[] allColors = { PieceColor.White, PieceColor.Black, PieceColor.Green, PieceColor.Purple, PieceColor.Yellow, PieceColor.Orange };
+        foreach (PieceColor color in allColors)
         {
-            var whitePieces = PieceTray.WhiteTray.GetComponentsInChildren<ChessPiece>();
-            Debug.Log($"White tray: {PieceTray.WhiteTray.GetPieceCount()} pieces reported, {whitePieces.Length} pieces found in hierarchy");
-        }
-        if (PieceTray.BlackTray != null)
-        {
-            var blackPieces = PieceTray.BlackTray.GetComponentsInChildren<ChessPiece>();
-            Debug.Log($"Black tray: {PieceTray.BlackTray.GetPieceCount()} pieces reported, {blackPieces.Length} pieces found in hierarchy");
+            PieceTray tray = PieceTray.GetTrayForColor(color);
+            if (tray != null)
+            {
+                var pieces = tray.GetComponentsInChildren<ChessPiece>();
+                Debug.Log($"{color} tray: {tray.GetPieceCount()} pieces reported, {pieces.Length} pieces found in hierarchy");
+            }
+            else
+            {
+                Debug.Log($"{color} tray: NULL");
+            }
         }
         
         Debug.Log("🔍 === END AI SYSTEM DEBUG ===");
@@ -408,21 +422,29 @@ public class GameManager : MonoBehaviour
         GameObject gameStateObject = new GameObject("Game State Manager");
         gameStateObject.AddComponent<GameStateManager>();
         Debug.Log("GameManager: GameStateManager created");
-        
+
         // Create TurnManager for turn-based gameplay
         GameObject turnManagerObject = new GameObject("Turn Manager");
         turnManagerObject.AddComponent<TurnManager>();
         Debug.Log("GameManager: TurnManager created for turn-based gameplay");
-        
+
         // Create AIPlayer for AI functionality
         GameObject aiPlayerObject = new GameObject("AI Player");
         aiPlayerObject.AddComponent<AIPlayer>();
         Debug.Log("GameManager: AIPlayer created for AI placement and moves");
-        
+
+        // Create PieceTrayManager for centralized tray tracking (scalable multi-player)
+        GameObject pieceTrayManagerObject = new GameObject("Piece Tray Manager");
+        pieceTrayManagerObject.AddComponent<PieceTrayManager>();
+        Debug.Log("GameManager: PieceTrayManager created for centralized tray management");
+
         // Create ChaosRotationManager for chaos mode functionality
         GameObject chaosManagerObject = new GameObject("Chaos Rotation Manager");
         chaosManagerObject.AddComponent<ChaosRotationManager>();
         Debug.Log("GameManager: ChaosRotationManager created for chaos mode slice rotations");
+
+        // NOTE: BoardDimensionsManager is created in SceneBootstrap before any scenes load
+        // This ensures it's available when SceneController configures the board size
     }
     
     /// <summary>
@@ -475,21 +497,49 @@ public class GameManager : MonoBehaviour
             Debug.Log("GameManager: Trays already created, skipping...");
             return;
         }
-        
+
         Debug.Log("GameManager: Setting up piece trays...");
-        
-        // Create white tray (left side) - NEW APPROACH: Initialize after component creation
-        GameObject whiteTrayObject = new GameObject("White Tray");
-        PieceTray whiteTray = whiteTrayObject.AddComponent<PieceTray>();
-        whiteTray.Initialize(PieceColor.White, true); // Explicit initialization avoids lifecycle issues
-        
-        // Create black tray (right side) - NEW APPROACH: Initialize after component creation  
-        GameObject blackTrayObject = new GameObject("Black Tray");
-        PieceTray blackTray = blackTrayObject.AddComponent<PieceTray>();
-        blackTray.Initialize(PieceColor.Black, false); // Explicit initialization avoids lifecycle issues
-        
+
+        // Determine how many players are in the game
+        int playerCount = 2; // Default to 2 players
+        if (PlayerManager.Instance != null)
+        {
+            playerCount = PlayerManager.Instance.GetTotalPlayerCount();
+            Debug.Log($"GameManager: PlayerManager reports {playerCount} players");
+        }
+        else
+        {
+            Debug.LogWarning("GameManager: PlayerManager not available, defaulting to 2 players");
+        }
+
+        // Create trays for each active player
+        // Player order: White, Black, Green, Purple, Yellow, Orange
+        PieceColor[] playerColors = { PieceColor.White, PieceColor.Black, PieceColor.Green, PieceColor.Purple, PieceColor.Yellow, PieceColor.Orange };
+
+        for (int i = 0; i < playerCount && i < playerColors.Length; i++)
+        {
+            PieceColor color = playerColors[i];
+            CreateTrayForColor(color);
+        }
+
         traysCreated = true;
-        Debug.Log("GameManager: Piece trays created and marked as completed");
+        Debug.Log($"GameManager: Created {playerCount} piece trays successfully");
+    }
+
+    /// <summary>
+    /// Create a tray for a specific player color
+    /// </summary>
+    private void CreateTrayForColor(PieceColor color)
+    {
+        // Determine tray side based on color
+        // White=left, Black=right, Green/Purple/Yellow/Orange use their specific positions
+        bool isLeftSide = (color == PieceColor.White);
+
+        GameObject trayObject = new GameObject($"{color} Tray");
+        PieceTray tray = trayObject.AddComponent<PieceTray>();
+        tray.Initialize(color, isLeftSide);
+
+        Debug.Log($"GameManager: Created {color} tray");
     }
     
     private void SetupPlacementManager()
@@ -638,71 +688,85 @@ public class GameManager : MonoBehaviour
         }
         
         Debug.Log("🎭 GameManager: Starting piece creation in trays...");
-        
-        // Check if trays are ready (with improved error handling)
-        if (PieceTray.WhiteTray == null || PieceTray.BlackTray == null)
+
+        // Get all active players from PlayerManager
+        List<PieceColor> activePlayers = new List<PieceColor>();
+        if (PlayerManager.Instance != null)
         {
-            Debug.LogError("GameManager: Trays not ready! Cannot create pieces.");
-            Debug.LogError($"WhiteTray: {(PieceTray.WhiteTray != null ? "Ready" : "NULL")}");
-            Debug.LogError($"BlackTray: {(PieceTray.BlackTray != null ? "Ready" : "NULL")}");
-            
-            // Try to find existing trays in scene for debugging
-            PieceTray[] existingTrays = FindObjectsByType<PieceTray>(FindObjectsSortMode.None);
-            Debug.Log($"GameManager: Found {existingTrays.Length} existing tray objects in scene");
-            
-            foreach (PieceTray tray in existingTrays)
-            {
-                Debug.Log($"  Existing tray: {tray.name}, color: {tray.trayColor}, static reference set: {(tray.trayColor == PieceColor.White ? PieceTray.WhiteTray != null : PieceTray.BlackTray != null)}");
-            }
-            
-            return;
-        }
-        
-        Debug.Log($"🎭 GameManager: Trays ready! WhiteTray: {PieceTray.WhiteTray.name}, BlackTray: {PieceTray.BlackTray.name}");
-        
-        // Create pieces and add them to trays (not the board) - 1 King + 1 Queen + 2 Bishops + 2 Knights + 2 Rooks per side
-        CreatePieceInTray(PieceColor.White, ChessPieceType.King);
-        CreatePieceInTray(PieceColor.White, ChessPieceType.Queen);
-        CreatePieceInTray(PieceColor.White, ChessPieceType.Bishop);
-        CreatePieceInTray(PieceColor.White, ChessPieceType.Bishop);
-        CreatePieceInTray(PieceColor.White, ChessPieceType.Knight);
-        CreatePieceInTray(PieceColor.White, ChessPieceType.Knight);
-        CreatePieceInTray(PieceColor.White, ChessPieceType.Rook);
-        CreatePieceInTray(PieceColor.White, ChessPieceType.Rook);
-        
-        CreatePieceInTray(PieceColor.Black, ChessPieceType.King);
-        CreatePieceInTray(PieceColor.Black, ChessPieceType.Queen);
-        CreatePieceInTray(PieceColor.Black, ChessPieceType.Bishop);
-        CreatePieceInTray(PieceColor.Black, ChessPieceType.Bishop);
-        CreatePieceInTray(PieceColor.Black, ChessPieceType.Knight);
-        CreatePieceInTray(PieceColor.Black, ChessPieceType.Knight);
-        CreatePieceInTray(PieceColor.Black, ChessPieceType.Rook);
-        CreatePieceInTray(PieceColor.Black, ChessPieceType.Rook);
-        
-        Debug.Log("🎭 GameManager: All pieces created in trays");
-        
-        // Validate that all pieces were successfully placed in trays
-        int expectedPiecesPerTray = 8; // King, Queen, 2 Bishops, 2 Knights, 2 Rooks
-        int whiteTrayCount = PieceTray.WhiteTray != null ? PieceTray.WhiteTray.GetPieceCount() : 0;
-        int blackTrayCount = PieceTray.BlackTray != null ? PieceTray.BlackTray.GetPieceCount() : 0;
-        
-        Debug.Log($"🎭 White tray has {whiteTrayCount}/{expectedPiecesPerTray} pieces");
-        Debug.Log($"🎭 Black tray has {blackTrayCount}/{expectedPiecesPerTray} pieces");
-        
-        if (whiteTrayCount == expectedPiecesPerTray && blackTrayCount == expectedPiecesPerTray)
-        {
-            Debug.Log("✅ SUCCESS: All pieces successfully placed in trays!");
+            activePlayers = PlayerManager.Instance.GetAllPlayers();
+            Debug.Log($"GameManager: PlayerManager reports {activePlayers.Count} active players");
         }
         else
         {
-            Debug.LogError($"❌ VALIDATION FAILED: Expected {expectedPiecesPerTray} pieces per tray");
-            Debug.LogError($"  White tray: {whiteTrayCount}/{expectedPiecesPerTray} pieces");
-            Debug.LogError($"  Black tray: {blackTrayCount}/{expectedPiecesPerTray} pieces");
-            
-            if (whiteTrayCount < expectedPiecesPerTray || blackTrayCount < expectedPiecesPerTray)
+            // Fallback to White and Black
+            Debug.LogWarning("GameManager: PlayerManager not available, defaulting to White and Black");
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+        }
+
+        // Verify all trays exist for active players
+        bool allTraysReady = true;
+        foreach (PieceColor color in activePlayers)
+        {
+            PieceTray tray = PieceTray.GetTrayForColor(color);
+            if (tray == null)
             {
-                Debug.LogError("  Some pieces may have been destroyed or failed to place in trays");
+                Debug.LogError($"GameManager: {color} tray not found!");
+                allTraysReady = false;
             }
+            else
+            {
+                Debug.Log($"GameManager: {color} tray ready: {tray.name}");
+            }
+        }
+
+        if (!allTraysReady)
+        {
+            Debug.LogError("GameManager: Not all trays are ready! Cannot create pieces.");
+            return;
+        }
+
+        // Create pieces for each active player
+        // Each player gets: 1 King + 1 Queen + 2 Bishops + 2 Knights + 2 Rooks
+        foreach (PieceColor color in activePlayers)
+        {
+            Debug.Log($"🎭 Creating pieces for {color} player...");
+            CreatePieceInTray(color, ChessPieceType.King);
+            CreatePieceInTray(color, ChessPieceType.Queen);
+            CreatePieceInTray(color, ChessPieceType.Bishop);
+            CreatePieceInTray(color, ChessPieceType.Bishop);
+            CreatePieceInTray(color, ChessPieceType.Knight);
+            CreatePieceInTray(color, ChessPieceType.Knight);
+            CreatePieceInTray(color, ChessPieceType.Rook);
+            CreatePieceInTray(color, ChessPieceType.Rook);
+        }
+
+        Debug.Log("🎭 GameManager: All pieces created in trays");
+
+        // Validate that all pieces were successfully placed in trays
+        int expectedPiecesPerTray = 8; // King, Queen, 2 Bishops, 2 Knights, 2 Rooks
+        bool allValid = true;
+
+        foreach (PieceColor color in activePlayers)
+        {
+            PieceTray tray = PieceTray.GetTrayForColor(color);
+            int pieceCount = tray != null ? tray.GetPieceCount() : 0;
+            Debug.Log($"🎭 {color} tray has {pieceCount}/{expectedPiecesPerTray} pieces");
+
+            if (pieceCount != expectedPiecesPerTray)
+            {
+                Debug.LogError($"❌ {color} tray validation FAILED: {pieceCount}/{expectedPiecesPerTray} pieces");
+                allValid = false;
+            }
+        }
+
+        if (allValid)
+        {
+            Debug.Log($"✅ SUCCESS: All {activePlayers.Count} player trays have {expectedPiecesPerTray} pieces!");
+        }
+        else
+        {
+            Debug.LogError($"❌ VALIDATION FAILED: Some trays do not have the expected {expectedPiecesPerTray} pieces");
         }
     }
     
@@ -774,13 +838,13 @@ public class GameManager : MonoBehaviour
             Debug.Log($"  Applied {color} material to piece");
             
             Debug.Log($"  Set piece properties - Color: {piece.pieceColor}, Type: {piece.pieceType}");
-            
+
             // NOW activate the piece with all properties properly set
             pieceObject.SetActive(true);
             Debug.Log($"  Activated piece after setting properties");
-            
-            // Add piece to appropriate tray
-            PieceTray targetTray = (color == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+
+            // Add piece to appropriate tray using dynamic lookup
+            PieceTray targetTray = PieceTray.GetTrayForColor(color);
             Debug.Log($"  Target tray: {(targetTray != null ? targetTray.name : "NULL")}");
             
             if (targetTray != null)
@@ -1570,7 +1634,25 @@ public class GameManager : MonoBehaviour
             Debug.Log("GameManager: Game Menu UI already exists");
         }
     }
-    
+
+    /// <summary>
+    /// Set up coordinate labels UI (displays chess notation around the board)
+    /// </summary>
+    private void SetupCoordinateLabelsUI()
+    {
+        if (CoordinateLabelsUI.Instance == null)
+        {
+            Debug.Log("GameManager: Creating Coordinate Labels UI...");
+            GameObject coordinateLabelsObject = new GameObject("Coordinate Labels UI");
+            coordinateLabelsObject.AddComponent<CoordinateLabelsUI>();
+            Debug.Log("GameManager: Coordinate Labels UI created successfully");
+        }
+        else
+        {
+            Debug.Log("GameManager: Coordinate Labels UI already exists");
+        }
+    }
+
     /// <summary>
     /// Set up confirmation dialog system
     /// </summary>

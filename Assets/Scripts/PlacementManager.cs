@@ -2,6 +2,33 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
+/// Defines a 3D placement zone for a player during piece placement phase
+/// </summary>
+public struct PlacementZone
+{
+    public int xMin, xMax;   // X-layer range (slices closest to player's tray)
+    public int yMin, yMax;   // Y-row range (may be restricted on larger boards)
+    public int zMin, zMax;   // Z-column range (may be restricted on larger boards)
+
+    public PlacementZone(int xMin, int xMax, int yMin, int yMax, int zMin, int zMax)
+    {
+        this.xMin = xMin;
+        this.xMax = xMax;
+        this.yMin = yMin;
+        this.yMax = yMax;
+        this.zMin = zMin;
+        this.zMax = zMax;
+    }
+
+    public bool Contains(BoardPosition position)
+    {
+        return position.x >= xMin && position.x <= xMax &&
+               position.y >= yMin && position.y <= yMax &&
+               position.z >= zMin && position.z <= zMax;
+    }
+}
+
+/// <summary>
 /// Manages the piece placement phase where players place pieces from trays onto the board
 /// </summary>
 public class PlacementManager : MonoBehaviour
@@ -22,8 +49,7 @@ public class PlacementManager : MonoBehaviour
     private bool isAIPlacementInProgress = false;
     
     [Header("Player Readiness Tracking")]
-    private bool whitePlayerReady = false;
-    private bool blackPlayerReady = false;
+    private Dictionary<PieceColor, bool> playerReadiness = new Dictionary<PieceColor, bool>();
     
     [Header("Timing Fix")]
     private bool piecesReadyForAI = false; // Track when pieces are created and ready for AI placement
@@ -39,20 +65,144 @@ public class PlacementManager : MonoBehaviour
     public bool HasSelectedTrayPiece => selectedTrayPiece != null;
     
     /// <summary>
-    /// Get the valid X-layer for a piece color during placement phase
-    /// White pieces can only be placed in X=0, Black pieces in X=3
+    /// Get the placement zone for a piece color based on board size and player count
+    /// Handles 2-6 player configurations with appropriate Y/Z restrictions on larger boards
+    /// </summary>
+    public static PlacementZone GetPlacementZoneForColor(PieceColor color)
+    {
+        if (BoardDimensionsManager.Instance == null)
+        {
+            Debug.LogError("PlacementManager: BoardDimensionsManager.Instance is null, using default 4x4x4 zone");
+            // Fallback for 4x4x4 board
+            int x = (color == PieceColor.White) ? 0 : 3;
+            return new PlacementZone(x, x, 0, 3, 0, 3);
+        }
+
+        Vector3Int dims = BoardDimensionsManager.Instance.GetDimensions();
+        int boardSize = dims.x; // Board is cubic (x=y=z)
+
+        // Initialize zone boundaries
+        int xMin = 0, xMax = boardSize - 1;
+        int yMin = 0, yMax = boardSize - 1;
+        int zMin = 0, zMax = boardSize - 1;
+
+        // Determine placement zone based on player color and board orientation
+        // White/Black place on X-axis sides (left/right)
+        // Green/Purple place on Z-axis sides (front/back)
+        // Yellow/Orange place on Y-axis sides (bottom/top)
+        switch (color)
+        {
+            case PieceColor.White:
+                // White: Left side (X=0 slice)
+                xMin = xMax = 0;
+                break;
+
+            case PieceColor.Black:
+                // Black: Right side (X=max slice)
+                xMin = xMax = boardSize - 1;
+                break;
+
+            case PieceColor.Green:
+                // Green: Front side (Z=0 slice)
+                zMin = zMax = 0;
+                break;
+
+            case PieceColor.Purple:
+                // Purple: Back side (Z=max slice)
+                zMin = zMax = boardSize - 1;
+                break;
+
+            case PieceColor.Yellow:
+                // Yellow: Bottom side (Y=0 slice)
+                yMin = yMax = 0;
+                break;
+
+            case PieceColor.Orange:
+                // Orange: Top side (Y=max slice)
+                yMin = yMax = boardSize - 1;
+                break;
+
+            default:
+                Debug.LogError($"PlacementManager: Unknown player color {color}");
+                xMin = xMax = 0;
+                break;
+        }
+
+        // Apply Y/Z restrictions based on board size for X-axis players (White/Black)
+        // Apply X/Y restrictions based on board size for Z-axis players (Green/Purple)
+        // Apply X/Z restrictions based on board size for Y-axis players (Yellow/Orange)
+        if (boardSize == 6)
+        {
+            // 6x6x6 board: Divide the board into regions for 4 players
+            if (color == PieceColor.White || color == PieceColor.Black)
+            {
+                // White/Black (X-axis): Use top 3 Y-rows (Y=3,4,5), middle 4 Z-columns (Z=1,2,3,4)
+                // Restricts placement to 12 positions (3 rows × 4 columns) to prevent checkmate on placement
+                yMin = 3;
+                yMax = 5;
+                zMin = 1;
+                zMax = 4;
+            }
+            else if (color == PieceColor.Green || color == PieceColor.Purple)
+            {
+                // Green/Purple (Z-axis): Use bottom 3 Y-rows (Y=0,1,2), middle 4 X-columns (X=1,2,3,4)
+                // Restricts placement to 12 positions (3 rows × 4 columns) to prevent checkmate on placement
+                yMin = 0;
+                yMax = 2;
+                xMin = 1;
+                xMax = 4;
+            }
+            // Yellow/Orange not used in 4-player 6x6x6 games
+        }
+        else if (boardSize == 8)
+        {
+            // 8x8x8 board: Middle 4x4 grid for all players
+            if (color == PieceColor.White || color == PieceColor.Black)
+            {
+                // X-axis players: Middle YZ region
+                yMin = 2;
+                yMax = 5;
+                zMin = 2;
+                zMax = 5;
+            }
+            else if (color == PieceColor.Green || color == PieceColor.Purple)
+            {
+                // Z-axis players: Middle XY region
+                xMin = 2;
+                xMax = 5;
+                yMin = 2;
+                yMax = 5;
+            }
+            else if (color == PieceColor.Yellow || color == PieceColor.Orange)
+            {
+                // Y-axis players: Middle XZ region
+                xMin = 2;
+                xMax = 5;
+                zMin = 2;
+                zMax = 5;
+            }
+        }
+        // else 4x4x4: No restrictions, each player gets their full slice
+
+        return new PlacementZone(xMin, xMax, yMin, yMax, zMin, zMax);
+    }
+
+    /// <summary>
+    /// Legacy method for backward compatibility - returns X-layer for a color
     /// </summary>
     public static int GetValidXForColor(PieceColor color)
     {
-        return color == PieceColor.White ? 0 : 3;
+        PlacementZone zone = GetPlacementZoneForColor(color);
+        return zone.xMin; // Since xMin == xMax for single-slice placement
     }
-    
+
     /// <summary>
-    /// Check if a board position is in the correct X-layer for the given piece color
+    /// Check if a board position is in the correct placement zone for the given piece color
     /// </summary>
     public static bool IsPositionInColorZone(BoardPosition position, PieceColor color)
     {
-        return position.x == GetValidXForColor(color);
+        PlacementZone zone = GetPlacementZoneForColor(color);
+        return zone.Contains(position);
     }
     
     /// <summary>
@@ -61,39 +211,40 @@ public class PlacementManager : MonoBehaviour
     public void SetPlayerReady(PieceColor playerColor, bool ready = true)
     {
         bool previousState = IsPlayerReady(playerColor);
-        
+
         // Determine if this is human manual or AI auto-ready
         string playerType = TurnManager.Instance?.IsPlayerAI(playerColor) == true ? "AI (auto)" : "HUMAN (manual)";
-        
-        if (playerColor == PieceColor.White)
-        {
-            whitePlayerReady = ready;
-        }
-        else
-        {
-            blackPlayerReady = ready;
-        }
-        
+
+        // Set readiness in dictionary (initialize if needed)
+        playerReadiness[playerColor] = ready;
+
         Debug.Log($"🎯 PlacementManager: {playerColor} {playerType} readiness set to {ready}");
-        Debug.Log($"  Current readiness: White={whitePlayerReady}, Black={blackPlayerReady}");
-        Debug.Log($"  Both players ready: {AreBothPlayersReady()}");
-        
+
+        // Log all player readiness states
+        string readinessStatus = "";
+        foreach (var kvp in playerReadiness)
+        {
+            readinessStatus += $"{kvp.Key}={kvp.Value} ";
+        }
+        Debug.Log($"  Current readiness: {readinessStatus}");
+        Debug.Log($"  All players ready: {AreAllPlayersReady()}");
+
         // Fire event if readiness changed
         if (previousState != ready)
         {
             OnPlayerReadinessChanged?.Invoke(playerColor);
             Debug.Log($"🎯 PlacementManager: Fired OnPlayerReadinessChanged for {playerColor}");
         }
-        
+
         // Check if we should transition to gameplay now
-        if (ready && AreBothPlayersReady())
+        if (ready && AreAllPlayersReady())
         {
-            Debug.Log("🚀 PlacementManager: Both players are now ready - checking if transition should occur");
+            Debug.Log("🚀 PlacementManager: All players are now ready - checking if transition should occur");
             CheckPlacementCompletion();
         }
         else
         {
-            Debug.Log($"🎯 PlacementManager: Not yet transitioning - readiness status: White={whitePlayerReady}, Black={blackPlayerReady}");
+            Debug.Log($"🎯 PlacementManager: Not yet transitioning - waiting for all players to be ready");
         }
     }
     
@@ -102,15 +253,48 @@ public class PlacementManager : MonoBehaviour
     /// </summary>
     public bool IsPlayerReady(PieceColor playerColor)
     {
-        return playerColor == PieceColor.White ? whitePlayerReady : blackPlayerReady;
+        return playerReadiness.ContainsKey(playerColor) && playerReadiness[playerColor];
     }
-    
+
     /// <summary>
-    /// Check if both players are ready for gameplay
+    /// Check if all active players are ready for gameplay (supports 2-6 players)
     /// </summary>
+    public bool AreAllPlayersReady()
+    {
+        if (PlayerManager.Instance == null)
+        {
+            Debug.LogWarning("PlacementManager.AreAllPlayersReady: PlayerManager.Instance is null, falling back to White+Black only");
+            return IsPlayerReady(PieceColor.White) && IsPlayerReady(PieceColor.Black);
+        }
+
+        // Get all active player colors
+        List<PieceColor> activePlayers = PlayerManager.Instance.GetActivePlayers();
+
+        if (activePlayers.Count == 0)
+        {
+            Debug.LogWarning("PlacementManager.AreAllPlayersReady: No active players found");
+            return false;
+        }
+
+        // Check if all active players are ready
+        foreach (PieceColor playerColor in activePlayers)
+        {
+            if (!IsPlayerReady(playerColor))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Legacy method for backward compatibility - checks if both White and Black are ready
+    /// </summary>
+    [System.Obsolete("Use AreAllPlayersReady() instead for multi-player support")]
     public bool AreBothPlayersReady()
     {
-        return whitePlayerReady && blackPlayerReady;
+        return IsPlayerReady(PieceColor.White) && IsPlayerReady(PieceColor.Black);
     }
     
     /// <summary>
@@ -118,9 +302,8 @@ public class PlacementManager : MonoBehaviour
     /// </summary>
     public void ResetPlayerReadiness()
     {
-        whitePlayerReady = false;
-        blackPlayerReady = false;
-        Debug.Log("🔄 PlacementManager: Player readiness reset");
+        playerReadiness.Clear();
+        Debug.Log("🔄 PlacementManager: Player readiness dictionary cleared for all players");
     }
     
     private void Awake()
@@ -318,8 +501,8 @@ public class PlacementManager : MonoBehaviour
         
         // ASYNCHRONOUS PLACEMENT: Both players can place pieces simultaneously
         // No turn restrictions - any player can place pieces at any time during placement phase
-        bool isPieceInTray = piece.transform.IsChildOf(PieceTray.WhiteTray?.transform) || 
-                            piece.transform.IsChildOf(PieceTray.BlackTray?.transform);
+        PieceTray pieceTray = PieceTray.GetTrayForColor(piece.pieceColor);
+        bool isPieceInTray = (pieceTray != null && piece.transform.IsChildOf(pieceTray.transform));
         
         if (isPieceInTray)
         {
@@ -353,10 +536,10 @@ public class PlacementManager : MonoBehaviour
         Debug.Log($"    Transform local position: {piece.transform.localPosition}");
         
         selectedTrayPiece = piece;
-        
+
         // Handle repositioning: if piece is on board, temporarily remove it
-        bool isPieceInTray = piece.transform.IsChildOf(PieceTray.WhiteTray?.transform) || 
-                            piece.transform.IsChildOf(PieceTray.BlackTray?.transform);
+        PieceTray selectedPieceTray = PieceTray.GetTrayForColor(piece.pieceColor);
+        bool isPieceInTray = (selectedPieceTray != null && piece.transform.IsChildOf(selectedPieceTray.transform));
         
         if (!isPieceInTray && piece.CurrentPosition.IsValid())
         {
@@ -579,16 +762,31 @@ public class PlacementManager : MonoBehaviour
         }
         
         if (selectedTrayPiece == null || ChessBoard.Instance == null)
+        {
+            Debug.LogError($"🚨 ShowValidPlacementPositions: EARLY RETURN - selectedTrayPiece={(selectedTrayPiece == null ? "NULL" : "valid")}, ChessBoard.Instance={(ChessBoard.Instance == null ? "NULL" : "valid")}");
             return;
+        }
         
         Debug.Log("PlacementManager: Showing valid placement positions");
         
         // Get all positions that are valid for piece placement (empty squares only)
         var validPlacementPositions = GetValidPlacementPositions();
-        
+        Debug.Log($"🎯 ShowValidPlacementPositions: GetValidPlacementPositions returned {validPlacementPositions.Count} positions");
+
         foreach (var position in validPlacementPositions)
         {
-            CreatePlacementIndicator(position);
+            Debug.Log($"🔵 Creating indicator {placementIndicators.Count + 1} at position {position}");
+            try
+            {
+                CreatePlacementIndicator(position);
+                Debug.Log($"🔵 Indicator created successfully, total count now: {placementIndicators.Count}");
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"❌ FAILED to create indicator at {position}: {ex.Message}");
+                Debug.LogError($"   Exception: {ex}");
+                Debug.LogError($"   Stack trace: {ex.StackTrace}");
+            }
         }
         
         Debug.Log($"PlacementManager: Created {placementIndicators.Count} placement indicators");
@@ -614,34 +812,36 @@ public class PlacementManager : MonoBehaviour
             return validPositions;
         }
         
-        // Get the valid X-layer for the selected piece color
-        int validX = GetValidXForColor(selectedTrayPiece.pieceColor);
-        
-        Debug.Log($"PlacementManager: Finding valid positions for {selectedTrayPiece.pieceColor} piece in X-layer {validX}");
-        
+        // Get the valid placement zone for the selected piece color
+        PlacementZone zone = GetPlacementZoneForColor(selectedTrayPiece.pieceColor);
+
+        Debug.Log($"PlacementManager: Finding valid positions for {selectedTrayPiece.pieceColor} piece");
+        Debug.Log($"  Placement zone: X=[{zone.xMin}-{zone.xMax}], Y=[{zone.yMin}-{zone.yMax}], Z=[{zone.zMin}-{zone.zMax}]");
+
         // BOARD STATE DIAGNOSTIC: Check if board is in expected state for initial placement
         Debug.Log($"🔍 BOARD STATE: About to validate placement positions");
         Debug.Log($"🔍 Selected piece: {selectedTrayPiece.pieceColor} {selectedTrayPiece.pieceType}");
         Debug.Log($"🔍 Piece CurrentPosition: {selectedTrayPiece.CurrentPosition}");
         Debug.Log($"🔍 Piece transform parent: {(selectedTrayPiece.transform.parent != null ? selectedTrayPiece.transform.parent.name : "None")}");
-        
+
         // CRITICAL DIAGNOSTIC: Check if tray pieces have invalid positions as they should
-        bool isTrayPiece = selectedTrayPiece.transform.IsChildOf(PieceTray.WhiteTray?.transform) || 
-                          selectedTrayPiece.transform.IsChildOf(PieceTray.BlackTray?.transform);
+        PieceTray diagnosticTray = PieceTray.GetTrayForColor(selectedTrayPiece.pieceColor);
+        bool isTrayPiece = (diagnosticTray != null && selectedTrayPiece.transform.IsChildOf(diagnosticTray.transform));
         if (isTrayPiece && selectedTrayPiece.CurrentPosition.IsValid())
         {
             Debug.LogError($"🚨 INVALID STATE: Tray piece {selectedTrayPiece.pieceColor} {selectedTrayPiece.pieceType} has valid CurrentPosition {selectedTrayPiece.CurrentPosition}!");
             Debug.LogError($"🚨 Tray pieces should have INVALID positions, not valid board positions!");
             Debug.LogError($"🚨 This causes position repair to incorrectly place tray pieces on board!");
         }
-        
-        // Check what's actually on the board
+
+        // Check what's actually on the board (use board dimensions, not hardcoded 4)
+        Vector3Int dims = BoardDimensionsManager.Instance != null ? BoardDimensionsManager.Instance.GetDimensions() : new Vector3Int(4, 4, 4);
         int occupiedPositions = 0;
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < dims.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < dims.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < dims.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     ChessPiece pieceAt = ChessBoard.Instance.GetPieceAt(pos);
@@ -651,41 +851,43 @@ public class PlacementManager : MonoBehaviour
                         Debug.LogWarning($"🔍 OCCUPIED: Position {pos} has {pieceAt.pieceColor} {pieceAt.pieceType}");
                         Debug.LogWarning($"🔍   Piece parent: {(pieceAt.transform.parent != null ? pieceAt.transform.parent.name : "None")}");
                         Debug.LogWarning($"🔍   Piece CurrentPosition: {pieceAt.CurrentPosition}");
-                        
+
                         // Check if this is a tray piece incorrectly placed on board
-                        bool isPieceInTray = pieceAt.transform.IsChildOf(PieceTray.WhiteTray?.transform) || 
-                                           pieceAt.transform.IsChildOf(PieceTray.BlackTray?.transform);
+                        PieceTray pieceAtTray = PieceTray.GetTrayForColor(pieceAt.pieceColor);
+                        bool isPieceInTray = (pieceAtTray != null && pieceAt.transform.IsChildOf(pieceAtTray.transform));
                         if (isPieceInTray)
                         {
                             Debug.LogError($"🚨 CRITICAL: Piece at {pos} is STILL IN TRAY but registered on board!");
-                            Debug.LogError($"🚨 This is the root cause of the missing 16th placement position!");
+                            Debug.LogError($"🚨 This is the root cause of placement conflicts!");
                         }
                     }
                 }
             }
         }
         Debug.Log($"🔍 BOARD STATE: {occupiedPositions} positions occupied on board (should be 0 for initial placement)");
-        
-        // Check only positions in the correct X-layer for this piece color
+
+        // Check only positions within the placement zone for this piece color
         int positionsChecked = 0;
         int positionsValidated = 0;
         int positionsAdded = 0;
-        
-        for (int y = 0; y < 4; y++)
+
+        // Iterate through the zone's valid ranges
+        for (int x = zone.xMin; x <= zone.xMax; x++)
         {
-            for (int z = 0; z < 4; z++)
+            for (int y = zone.yMin; y <= zone.yMax; y++)
             {
-                // Only check the valid X-layer for this piece color
-                BoardPosition position = new BoardPosition(validX, y, z);
-                positionsChecked++;
-                
-                Debug.Log($"🔍 LOOP: Checking position {position} (iteration {positionsChecked}/16)");
-                
-                // Check if position is empty and in correct X-layer (enhanced placement validation)
-                bool canPlace = ChessBoard.Instance.CanPlacePieceAt(position, selectedTrayPiece.pieceColor);
-                Debug.Log($"🔍 VALIDATION: CanPlacePieceAt({position}) = {canPlace}");
-                
-                if (canPlace)
+                for (int z = zone.zMin; z <= zone.zMax; z++)
+                {
+                    BoardPosition position = new BoardPosition(x, y, z);
+                    positionsChecked++;
+
+                    Debug.Log($"🔍 LOOP: Checking position {position} (iteration {positionsChecked})");
+
+                    // Check if position is empty and in correct zone (enhanced placement validation)
+                    bool canPlace = ChessBoard.Instance.CanPlacePieceAt(position, selectedTrayPiece.pieceColor);
+                    Debug.Log($"🔍 VALIDATION: CanPlacePieceAt({position}) = {canPlace}");
+
+                    if (canPlace)
                 {
                     positionsValidated++;
                     Debug.Log($"🔍 ADDING: Adding position {position} to validPositions list (#{positionsValidated})");
@@ -707,20 +909,21 @@ public class PlacementManager : MonoBehaviour
                 {
                     Debug.Log($"🔍 SKIPPED: Position {position} failed validation, not adding to list");
                 }
+                }
             }
         }
-        
+
         Debug.Log($"🔍 SUMMARY: Checked {positionsChecked} positions, {positionsValidated} validated, {positionsAdded} added");
         Debug.Log($"🔍 FINAL: validPositions.Count = {validPositions.Count}");
-        
+
         // Log all positions in the final list
         Debug.Log($"🔍 FINAL LIST CONTENTS:");
         for (int i = 0; i < validPositions.Count; i++)
         {
             Debug.Log($"  [{i}]: {validPositions[i]}");
         }
-        
-        Debug.Log($"PlacementManager: Found {validPositions.Count} valid placement positions for {selectedTrayPiece.pieceColor} in X={validX} layer");
+
+        Debug.Log($"PlacementManager: Found {validPositions.Count} valid placement positions for {selectedTrayPiece.pieceColor} in zone X=[{zone.xMin}-{zone.xMax}], Y=[{zone.yMin}-{zone.yMax}], Z=[{zone.zMin}-{zone.zMax}]");
         return validPositions;
     }
     
@@ -729,7 +932,9 @@ public class PlacementManager : MonoBehaviour
     /// </summary>
     private void CreatePlacementIndicator(BoardPosition position)
     {
-        GameObject indicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        try
+        {
+            GameObject indicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         indicator.name = $"PlacementIndicator_{position.x}_{position.y}_{position.z}";
         
         // CRITICAL FIX: Parent indicator to board container so it rotates with the board
@@ -803,41 +1008,168 @@ public class PlacementManager : MonoBehaviour
         PlacementTargetData targetData = indicator.AddComponent<PlacementTargetData>();
         targetData.targetPosition = position;
         
-        // Apply material
+        // Apply material - create indicator with player's color
         Renderer renderer = indicator.GetComponent<Renderer>();
-        if (validPlacementMaterial == null)
+        Color playerColor = GetColorForPieceColor(selectedTrayPiece.pieceColor);
+        Debug.Log($"🎨 Creating indicator for {selectedTrayPiece.pieceColor} with Unity Color: {playerColor}");
+        Material coloredMaterial = CreatePlacementMaterial(playerColor);
+        Debug.Log($"🎨 Material created - color: {coloredMaterial.color}, hasProperty(_BaseColor): {coloredMaterial.HasProperty("_BaseColor")}");
+        if (coloredMaterial.HasProperty("_BaseColor"))
         {
-            validPlacementMaterial = CreatePlacementMaterial(Color.green);
+            Debug.Log($"🎨 Material _BaseColor: {coloredMaterial.GetColor("_BaseColor")}");
         }
-        renderer.material = validPlacementMaterial;
+        renderer.material = coloredMaterial;
         
         placementIndicators.Add(indicator);
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"💥 CreatePlacementIndicator EXCEPTION for {position}: {ex.Message}");
+            Debug.LogError($"   Stack: {ex.StackTrace}");
+            throw; // Re-throw to be caught by outer try-catch
+        }
     }
     
     /// <summary>
+    /// Get a working shader for indicators with fallback chain
+    /// Uses the same approach as ThreatIndicatorManager for consistency
+    /// </summary>
+    private Shader GetIndicatorShader()
+    {
+        // Try shaders in priority order (same as check indicator system)
+        string[] shaderNames = new string[]
+        {
+            "Transparent/Diffuse",
+            "Legacy Shaders/Transparent/Diffuse",
+            "Sprites/Default"
+        };
+
+        foreach (string shaderName in shaderNames)
+        {
+            Shader shader = Shader.Find(shaderName);
+            if (shader != null)
+            {
+                Debug.Log($"✅ PlacementManager: Found working shader: {shaderName}");
+                return shader;
+            }
+            else
+            {
+                Debug.LogWarning($"PlacementManager: Shader '{shaderName}' not found, trying next fallback...");
+            }
+        }
+
+        Debug.LogError("❌ PlacementManager: No suitable shader found! Indicators will fail to render.");
+        return null;
+    }
+
+    /// <summary>
     /// Create a material for placement indicators
+    /// FIXED: Use shader fallback system instead of hardcoded URP shader
     /// </summary>
     private Material CreatePlacementMaterial(Color color)
     {
-        Material material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+        // FIXED: Use shader fallback system (same as check indicators)
+        Shader indicatorShader = GetIndicatorShader();
+        if (indicatorShader == null)
+        {
+            Debug.LogError($"🚨 PlacementManager: Cannot create material - no suitable shader found!");
+            return null;
+        }
+
+        Material material = new Material(indicatorShader);
+
+        // Set color (works with all shader types)
         material.color = color;
-        material.SetFloat("_Smoothness", 0.8f);
+
+        // Render queue for transparency
+        material.renderQueue = 3000; // Render after opaque objects
+
+        Debug.Log($"🎨 PlacementManager: Created placement material with shader {indicatorShader.name}, color {color}");
+
         return material;
     }
-    
+
+    /// <summary>
+    /// Convert PieceColor enum to Unity Color for visual indicators
+    /// </summary>
+    private Color GetColorForPieceColor(PieceColor pieceColor)
+    {
+        return pieceColor switch
+        {
+            PieceColor.White => Color.white,
+            PieceColor.Black => new Color(0.2f, 0.2f, 0.2f), // Dark gray (black is too dark)
+            PieceColor.Green => Color.green,
+            PieceColor.Purple => new Color(0.6f, 0.2f, 0.8f), // Purple
+            PieceColor.Yellow => Color.yellow,
+            PieceColor.Orange => new Color(1.0f, 0.5f, 0.0f), // Orange
+            _ => Color.white
+        };
+    }
+
     /// <summary>
     /// Clear all placement indicators
     /// </summary>
     private void ClearPlacementIndicators()
     {
+        int listCount = placementIndicators.Count;
+        int destroyedFromList = 0;
+
+        // Clear indicators tracked in our list
         foreach (var indicator in placementIndicators)
         {
             if (indicator != null)
             {
-                DestroyImmediate(indicator);
+                // Immediately disable the indicator to make it invisible this frame
+                // Destroy() schedules destruction at end of frame, so disable ensures instant visual clearing
+                indicator.SetActive(false);
+                Destroy(indicator);
+                destroyedFromList++;
             }
         }
         placementIndicators.Clear();
+
+        // NUCLEAR OPTION: Also find and destroy any orphaned indicators in the scene
+        // This catches indicators that were created before our fixes and aren't in the list
+        int orphanedIndicators = DestroyAllOrphanedIndicators();
+
+        if (orphanedIndicators > 0)
+        {
+            Debug.LogWarning($"🧹 PlacementManager: Found and destroyed {orphanedIndicators} orphaned placement indicators!");
+        }
+
+        Debug.Log($"🧹 PlacementManager: Cleared {destroyedFromList} indicators from list (out of {listCount}), plus {orphanedIndicators} orphaned");
+    }
+
+    /// <summary>
+    /// Find and destroy any placement or move indicators left in the scene that aren't in our lists
+    /// This is a cleanup fallback for indicators that somehow got orphaned
+    /// </summary>
+    private int DestroyAllOrphanedIndicators()
+    {
+        int destroyedCount = 0;
+
+        // Find all GameObjects in scene with "Indicator" in their name
+        GameObject[] allObjects = FindObjectsOfType<GameObject>(true); // Include inactive objects
+
+        foreach (GameObject obj in allObjects)
+        {
+            if (obj != null && (obj.name.Contains("PlacementIndicator") || obj.name.Contains("MoveIndicator")))
+            {
+                // Check if this indicator is in our list
+                bool isInList = placementIndicators.Contains(obj);
+
+                if (!isInList)
+                {
+                    // Orphaned indicator - destroy it immediately
+                    obj.SetActive(false);
+                    Destroy(obj);
+                    destroyedCount++;
+                    Debug.Log($"🧹 Found orphaned indicator: {obj.name} at {obj.transform.position}");
+                }
+            }
+        }
+
+        return destroyedCount;
     }
     
     /// <summary>
@@ -887,11 +1219,16 @@ public class PlacementManager : MonoBehaviour
         bool isRepositioningPiece = repositioningPieces.ContainsKey(piece);
         BoardPosition originalPosition = new BoardPosition(-1, -1, -1); // Invalid position
         ChessPiece originalPositionPiece = null;
-        
+
         if (isRepositioningPiece)
         {
             originalPosition = repositioningPieces[piece];
             Debug.Log($"🔄 PlacementManager: This is a repositioning piece from {originalPosition} to {position}");
+
+            // CRITICAL FIX: Remove from repositioning dictionary immediately to prevent it from
+            // staying marked as "repositioning" for future placements
+            repositioningPieces.Remove(piece);
+            Debug.Log($"🔄 PlacementManager: Cleared repositioning flag for {piece.pieceColor} {piece.pieceType}");
             
             // CRITICAL FIX: Temporarily clear the original position for clean validation
             // This prevents the repositioning piece from interfering with placement validation
@@ -974,26 +1311,58 @@ public class PlacementManager : MonoBehaviour
         }
         
         Debug.Log($"✅ PlacementManager: Placement validation passed - position {position} is empty and valid");
-        
+
+        // DIAGNOSTIC: Check if repositioning flag is blocking tray removal for AI pieces
+        Debug.Log($"🔍 TRACE PlacementManager: About to check isRepositioningPiece for {piece.pieceColor} {piece.pieceType}");
+        Debug.Log($"🔍 TRACE: isRepositioningPiece = {isRepositioningPiece}");
+        Debug.Log($"🔍 TRACE: repositioningPieces.ContainsKey(piece) = {repositioningPieces.ContainsKey(piece)}");
+        if (repositioningPieces.ContainsKey(piece))
+        {
+            Debug.Log($"🔍 TRACE: repositioningPieces[piece] = {repositioningPieces[piece]}");
+        }
+
         // Remove piece from tray only if it's not a repositioning piece
         if (!isRepositioningPiece)
         {
             // Use PieceTrayManager for scalable tray access
             PieceTray tray = null;
+            Debug.Log($"🔍 PlacementManager: Attempting to get tray for {piece.pieceColor}");
+            Debug.Log($"🔍   PieceTrayManager.Instance = {(PieceTrayManager.Instance != null ? "EXISTS" : "NULL")}");
+
             if (PieceTrayManager.Instance != null)
             {
                 tray = PieceTrayManager.Instance.GetTray(piece.pieceColor);
+                Debug.Log($"🔍   PieceTrayManager.GetTray({piece.pieceColor}) = {(tray != null ? $"FOUND (trayColor={tray.trayColor})" : "NULL")}");
             }
             else
             {
                 // Fallback for 2-player games
                 tray = (piece.pieceColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+                Debug.Log($"🔍   Using fallback static tray for {piece.pieceColor}: {(tray != null ? "FOUND" : "NULL")}");
+            }
+
+            // CRITICAL: Always try GetTrayForColor() as secondary lookup if primary failed
+            if (tray == null)
+            {
+                Debug.LogError($"🚨 PlacementManager: Primary tray lookup returned NULL for {piece.pieceColor}!");
+                Debug.LogError($"🚨 Attempting secondary lookup via PieceTray.GetTrayForColor()...");
+                tray = PieceTray.GetTrayForColor(piece.pieceColor);
+                Debug.LogError($"🚨 Secondary lookup result: {(tray != null ? $"FOUND (trayColor={tray.trayColor})" : "STILL NULL")}");
             }
 
             if (tray != null)
             {
-                tray.RemovePiece(piece);
-                Debug.Log($"PlacementManager: Removed {piece.pieceColor} {piece.pieceType} from tray");
+                Debug.Log($"🎯 PlacementManager: About to call RemovePiece on {tray.trayColor} tray for {piece.pieceColor} {piece.pieceType}");
+                bool removed = tray.RemovePiece(piece);
+                Debug.Log($"PlacementManager: RemovePiece returned {removed} for {piece.pieceColor} {piece.pieceType}");
+            }
+            else
+            {
+                Debug.LogError($"🚨🚨🚨 CRITICAL: Tray is NULL for {piece.pieceColor} - piece will NOT be removed from tray!");
+                Debug.LogError($"🚨 This means GetPieceCount() will never decrement and AI will think pieces remain!");
+                Debug.LogError($"🚨 Piece being placed: {piece.pieceColor} {piece.pieceType} at {position}");
+                Debug.LogError($"🚨 Check if PieceTray.Initialize() was called for {piece.pieceColor} tray");
+                Debug.LogError($"🚨 Check if PieceTrayManager.RegisterTray() was called for {piece.pieceColor}");
             }
         }
         else
@@ -1002,8 +1371,7 @@ public class PlacementManager : MonoBehaviour
             Debug.Log($"🔄 PlacementManager: Completing repositioning from {originalPosition} to {position}");
             
             // The original position was already cleared during validation above
-            // Just remove from repositioning tracking since it's being successfully placed
-            repositioningPieces.Remove(piece);
+            // Repositioning already cleared above (line 1143)
             Debug.Log($"🔄 ✅ Completed repositioning of {piece.pieceColor} {piece.pieceType} from {originalPosition} to {position}");
         }
         
@@ -1034,8 +1402,7 @@ public class PlacementManager : MonoBehaviour
                 ChessBoard.Instance.SetPieceAt(position, piece);
             }
             
-            // Clean up repositioning tracking
-            repositioningPieces.Remove(piece);
+            // Repositioning already cleared above (line 1143)
             Debug.Log($"🔄 ✅ Completed repositioning of {piece.pieceColor} {piece.pieceType} from {originalPos} to {position}");
         }
         else
@@ -1075,35 +1442,60 @@ public class PlacementManager : MonoBehaviour
     }
     
     /// <summary>
-    /// Check if the placement phase should be completed
+    /// Check if the placement phase should be completed (supports 2-6 players)
     /// </summary>
     private void CheckPlacementCompletion()
     {
-        Debug.Log("PlacementManager: Checking placement completion...");
-        
-        // Check if both players have completed their placement (empty trays)
-        bool whiteCompleted = IsPlayerPlacementCompleted(PieceColor.White);
-        bool blackCompleted = IsPlayerPlacementCompleted(PieceColor.Black);
-        
-        Debug.Log($"PlacementManager: Placement completion status - White: {whiteCompleted}, Black: {blackCompleted}");
-        
-        // UNIVERSAL READINESS REQUIREMENT: All game modes now require both players to be ready
-        // This ensures human players always control when gameplay begins
-        Debug.Log($"🎯 PlacementManager: Checking readiness for all game modes");
-        Debug.Log($"🎯 Placement status: White completed={whiteCompleted}, Black completed={blackCompleted}");
-        Debug.Log($"🎯 Player readiness: White ready={whitePlayerReady}, Black ready={blackPlayerReady}");
-        
-        // Determine player types for logging
-        string whitePlayerType = TurnManager.Instance?.IsPlayerAI(PieceColor.White) == true ? "AI" : "HUMAN";
-        string blackPlayerType = TurnManager.Instance?.IsPlayerAI(PieceColor.Black) == true ? "AI" : "HUMAN";
-        Debug.Log($"🎯 Player types: White={whitePlayerType}, Black={blackPlayerType}");
-        
-        // Require both players to have pieces placed AND be ready (human manual or AI auto)
-        if (whiteCompleted && blackCompleted && AreBothPlayersReady())
+        Debug.Log("PlacementManager: Checking placement completion for all active players...");
+
+        if (PlayerManager.Instance == null)
         {
-            Debug.Log($"✅ PlacementManager: Both players completed placement and are ready - transitioning to gameplay");
-            Debug.Log($"  White: {whitePlayerType} (completed={whiteCompleted}, ready={whitePlayerReady})");
-            Debug.Log($"  Black: {blackPlayerType} (completed={blackCompleted}, ready={blackPlayerReady})");
+            Debug.LogError("PlacementManager.CheckPlacementCompletion: PlayerManager.Instance is null");
+            return;
+        }
+
+        // Get all active players
+        List<PieceColor> activePlayers = PlayerManager.Instance.GetActivePlayers();
+        Debug.Log($"PlacementManager: Checking {activePlayers.Count} active players");
+
+        // Check completion status for all active players
+        bool allCompleted = true;
+        string completionStatus = "";
+        string readinessStatus = "";
+        string playerTypes = "";
+
+        foreach (PieceColor playerColor in activePlayers)
+        {
+            bool completed = IsPlayerPlacementCompleted(playerColor);
+            bool ready = IsPlayerReady(playerColor);
+            string playerType = TurnManager.Instance?.IsPlayerAI(playerColor) == true ? "AI" : "HUMAN";
+
+            completionStatus += $"{playerColor}={completed} ";
+            readinessStatus += $"{playerColor}={ready} ";
+            playerTypes += $"{playerColor}={playerType} ";
+
+            if (!completed)
+            {
+                allCompleted = false;
+            }
+        }
+
+        Debug.Log($"🎯 PlacementManager: Checking readiness for all game modes");
+        Debug.Log($"🎯 Placement status: {completionStatus}");
+        Debug.Log($"🎯 Player readiness: {readinessStatus}");
+        Debug.Log($"🎯 Player types: {playerTypes}");
+
+        // Require all players to have pieces placed AND be ready (human manual or AI auto)
+        if (allCompleted && AreAllPlayersReady())
+        {
+            Debug.Log($"✅ PlacementManager: All {activePlayers.Count} players completed placement and are ready - transitioning to gameplay");
+            foreach (PieceColor playerColor in activePlayers)
+            {
+                string playerType = TurnManager.Instance?.IsPlayerAI(playerColor) == true ? "AI" : "HUMAN";
+                bool completed = IsPlayerPlacementCompleted(playerColor);
+                bool ready = IsPlayerReady(playerColor);
+                Debug.Log($"  {playerColor}: {playerType} (completed={completed}, ready={ready})");
+            }
             CompletePlacementPhase();
             return;
         }
@@ -1111,17 +1503,19 @@ public class PlacementManager : MonoBehaviour
         {
             // Detailed waiting analysis
             string waitingFor = "";
-            if (!whiteCompleted) waitingFor += $"White {whitePlayerType} to place pieces ";
-            if (!blackCompleted) waitingFor += $"Black {blackPlayerType} to place pieces ";
-            if (!whitePlayerReady) waitingFor += $"White {whitePlayerType} to be ready ";
-            if (!blackPlayerReady) waitingFor += $"Black {blackPlayerType} to be ready ";
-            
+            foreach (PieceColor playerColor in activePlayers)
+            {
+                bool completed = IsPlayerPlacementCompleted(playerColor);
+                bool ready = IsPlayerReady(playerColor);
+                string playerType = TurnManager.Instance?.IsPlayerAI(playerColor) == true ? "AI" : "HUMAN";
+
+                if (!completed) waitingFor += $"{playerColor} {playerType} to place pieces ";
+                if (!ready) waitingFor += $"{playerColor} {playerType} to be ready ";
+            }
+
             Debug.Log($"🎯 PlacementManager: Waiting for: {waitingFor.TrimEnd()}");
             return;
         }
-        
-        // NOTE: This point should not be reached as the method returns above
-        // All game modes now consistently require both placement completion AND readiness
     }
     
     /// <summary>
@@ -1138,12 +1532,17 @@ public class PlacementManager : MonoBehaviour
             int totalPieces = 0;
             int whitePieces = 0;
             int blackPieces = 0;
-            
-            for (int x = 0; x < 4; x++)
+
+            // Get dynamic board dimensions
+            Vector3Int dims = BoardDimensionsManager.Instance != null
+                ? BoardDimensionsManager.Instance.GetDimensions()
+                : new Vector3Int(4, 4, 4);
+
+            for (int x = 0; x < dims.x; x++)
             {
-                for (int y = 0; y < 4; y++)
+                for (int y = 0; y < dims.y; y++)
                 {
-                    for (int z = 0; z < 4; z++)
+                    for (int z = 0; z < dims.z; z++)
                     {
                         ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
                         if (piece != null)
@@ -1156,7 +1555,7 @@ public class PlacementManager : MonoBehaviour
                     }
                 }
             }
-            
+
             Debug.Log($"🚀 BOARD STATE: Total pieces: {totalPieces}, White: {whitePieces}, Black: {blackPieces}");
         }
         else
@@ -1297,30 +1696,63 @@ public class PlacementManager : MonoBehaviour
         }
         
         Debug.Log("🚀 📋 PlacementManager: Evaluating initial check states after placement...");
-        
+
         // Force a fresh evaluation of check states with all pieces on board
         CheckDetectionManager.Instance.InvalidateCache();
-        
-        // Get the current check states
-        bool whiteInCheck = CheckDetectionManager.Instance.IsKingInCheck(PieceColor.White);
-        
-        // CRITICAL FIX: Invalidate cache again before Black king check to ensure fresh evaluation
-        CheckDetectionManager.Instance.InvalidateCache();
-        bool blackInCheck = CheckDetectionManager.Instance.IsKingInCheck(PieceColor.Black);
-        
-        Debug.Log($"🚀 📋 PlacementManager: Post-placement check states - White: {whiteInCheck}, Black: {blackInCheck}");
-        
-        // Initialize UI state with safe method and update visual feedback
-        CheckDetectionManager.Instance.InitializeUIStateWithInitialChecks(whiteInCheck, blackInCheck);
-        
-        // Also trigger safe visual feedback update to ensure UI is in sync
+
+        // MULTI-PLAYER FIX: Get check states for all active players (2-6 players)
+        System.Collections.Generic.Dictionary<PieceColor, bool> playerCheckStates = new System.Collections.Generic.Dictionary<PieceColor, bool>();
+
+        System.Collections.Generic.List<PieceColor> activePlayers = new System.Collections.Generic.List<PieceColor>();
+        if (PlayerManager.Instance != null)
+        {
+            activePlayers = PlayerManager.Instance.GetActivePlayers();
+            Debug.Log($"🚀 📋 PlacementManager: Checking initial check states for {activePlayers.Count} active players");
+        }
+        else
+        {
+            // Fallback to 2-player mode
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+            Debug.Log($"🚀 📋 PlacementManager: PlayerManager not available, checking 2 players (fallback)");
+        }
+
+        // Check each active player's king for check state
+        foreach (PieceColor player in activePlayers)
+        {
+            CheckDetectionManager.Instance.InvalidateCache(); // Fresh evaluation for each player
+            bool isInCheck = CheckDetectionManager.Instance.IsKingInCheck(player);
+            playerCheckStates[player] = isInCheck;
+
+            Debug.Log($"🚀 📋 PlacementManager: {player} king check state: {(isInCheck ? "IN CHECK" : "safe")}");
+        }
+
+        // For 2-player games, maintain backwards compatibility with UI initialization
+        if (activePlayers.Count == 2 && activePlayers.Contains(PieceColor.White) && activePlayers.Contains(PieceColor.Black))
+        {
+            bool whiteInCheck = playerCheckStates[PieceColor.White];
+            bool blackInCheck = playerCheckStates[PieceColor.Black];
+
+            // Initialize UI state with safe method and update visual feedback
+            CheckDetectionManager.Instance.InitializeUIStateWithInitialChecks(whiteInCheck, blackInCheck);
+
+            Debug.Log($"🚀 📋 PlacementManager: 2-player check states - White: {whiteInCheck}, Black: {blackInCheck}");
+        }
+        else
+        {
+            // Multi-player games: Initialize UI for all players
+            // TODO: CheckDetectionManager needs multi-player UI initialization support
+            Debug.Log($"🚀 📋 PlacementManager: Multi-player check states initialized for {activePlayers.Count} players");
+        }
+
+        // Trigger safe visual feedback update to ensure UI is in sync
         CheckDetectionManager.Instance.SafeUpdateVisualFeedback();
-        
+
         // Store the initial check states for TurnManager to use
         if (TurnManager.Instance != null)
         {
-            TurnManager.Instance.SetInitialCheckStates(whiteInCheck, blackInCheck);
-            Debug.Log("🚀 📋 PlacementManager: Initial check states sent to TurnManager");
+            TurnManager.Instance.SetInitialCheckStates(playerCheckStates);
+            Debug.Log($"🚀 📋 PlacementManager: Initial check states sent to TurnManager for {playerCheckStates.Count} players");
         }
         else
         {
@@ -1342,13 +1774,18 @@ public class PlacementManager : MonoBehaviour
         bool hasWhitePieces = false;
         bool hasBlackPieces = false;
         int totalPieces = 0;
-        
+
+        // Get dynamic board dimensions
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
         // Check all board positions for pieces
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < dims.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < dims.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < dims.z; z++)
                 {
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
                     if (piece != null)
@@ -1400,15 +1837,20 @@ public class PlacementManager : MonoBehaviour
         
         // Find all pieces on the board and move them back to trays
         List<ChessPiece> boardPieces = new List<ChessPiece>();
-        
+
+        // Get dynamic board dimensions
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
         // Only collect pieces that are actually on the board (have valid positions)
         if (ChessBoard.Instance != null)
         {
-            for (int x = 0; x < 4; x++)
+            for (int x = 0; x < dims.x; x++)
             {
-                for (int y = 0; y < 4; y++)
+                for (int y = 0; y < dims.y; y++)
                 {
-                    for (int z = 0; z < 4; z++)
+                    for (int z = 0; z < dims.z; z++)
                     {
                         BoardPosition pos = new BoardPosition(x, y, z);
                         ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
@@ -1520,24 +1962,29 @@ public class PlacementManager : MonoBehaviour
         
         int pawnCount = 0;
         List<BoardPosition> pawnPositions = new List<BoardPosition>(); // Track to prevent duplicates
-        
+
+        // Get dynamic board dimensions
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
         // Find all pieces on the board and spawn pawns in front of them
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < dims.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < dims.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < dims.z; z++)
                 {
                     BoardPosition position = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(position);
-                    
+
                     if (piece != null && piece.pieceType != ChessPieceType.Pawn)
                     {
                         // Calculate position directly in front of the piece based on color
                         BoardPosition pawnPosition = GetPawnSpawnPosition(position, piece.pieceColor);
-                        
+
                         // Validate pawn spawn position and check for duplicates
-                        if (pawnPosition.IsValid() && 
+                        if (pawnPosition.IsValid() &&
                             ChessBoard.Instance.GetPieceAt(pawnPosition) == null &&
                             !pawnPositions.Contains(pawnPosition))
                         {
@@ -1592,19 +2039,48 @@ public class PlacementManager : MonoBehaviour
     }
     
     /// <summary>
-    /// Calculate the position directly in front of a piece based on color
-    /// White pieces advance +X, Black pieces advance -X
+    /// Calculate the position directly in front of a piece based on color and movement axis
+    /// Each color moves along a specific axis:
+    /// - White/Black: X-axis
+    /// - Green/Purple: Z-axis
+    /// - Yellow/Orange: Y-axis
     /// </summary>
     private BoardPosition GetPawnSpawnPosition(BoardPosition piecePosition, PieceColor color)
     {
-        int forwardX = (color == PieceColor.White) ? 1 : -1;
+        Vector3Int forwardDir;
+
+        switch (color)
+        {
+            case PieceColor.White:
+                forwardDir = new Vector3Int(1, 0, 0);   // +X direction
+                break;
+            case PieceColor.Black:
+                forwardDir = new Vector3Int(-1, 0, 0);  // -X direction
+                break;
+            case PieceColor.Green:
+                forwardDir = new Vector3Int(0, 0, 1);   // +Z direction
+                break;
+            case PieceColor.Purple:
+                forwardDir = new Vector3Int(0, 0, -1);  // -Z direction
+                break;
+            case PieceColor.Yellow:
+                forwardDir = new Vector3Int(0, 1, 0);   // +Y direction
+                break;
+            case PieceColor.Orange:
+                forwardDir = new Vector3Int(0, -1, 0);  // -Y direction
+                break;
+            default:
+                Debug.LogWarning($"GetPawnSpawnPosition: Unknown color {color}, defaulting to +X");
+                forwardDir = new Vector3Int(1, 0, 0);
+                break;
+        }
+
         BoardPosition pawnPosition = new BoardPosition(
-            piecePosition.x + forwardX,
-            piecePosition.y,
-            piecePosition.z
+            piecePosition.x + forwardDir.x,
+            piecePosition.y + forwardDir.y,
+            piecePosition.z + forwardDir.z
         );
-        
-        
+
         return pawnPosition;
     }
     
@@ -1690,24 +2166,30 @@ public class PlacementManager : MonoBehaviour
     }
     
     /// <summary>
-    /// Trigger AI placement for both players simultaneously (asynchronous mode)
+    /// Trigger AI placement for all AI players simultaneously (asynchronous mode, supports 2-6 players)
     /// </summary>
     private void TriggerAIPlacementForBothPlayers()
     {
-        Debug.Log("🚀 ENTRY: PlacementManager.TriggerAIPlacementForBothPlayers - Starting AI placement process");
-        
+        Debug.Log("🚀 ENTRY: PlacementManager.TriggerAIPlacementForBothPlayers - Starting AI placement process for all players");
+
         if (AIPlayer.Instance == null)
         {
             Debug.LogError("🚨 CRITICAL: PlacementManager: AIPlayer.Instance is null, cannot trigger AI placement");
             return;
         }
-        
+
         if (TurnManager.Instance == null)
         {
             Debug.LogError("🚨 CRITICAL: PlacementManager: TurnManager.Instance is null, cannot determine AI players");
             return;
         }
-        
+
+        if (PlayerManager.Instance == null)
+        {
+            Debug.LogError("🚨 CRITICAL: PlacementManager: PlayerManager.Instance is null, cannot get active players");
+            return;
+        }
+
         // TIMING FIX: Verify pieces are actually ready before attempting AI placement
         if (!piecesReadyForAI)
         {
@@ -1715,62 +2197,47 @@ public class PlacementManager : MonoBehaviour
             Debug.LogWarning("⚠️ This method should only be called via NotifyPiecesReady() after GameManager creates pieces");
             return;
         }
-        
+
         // CRITICAL FIX: Validate and repair tray piece positions before AI placement
         // This fixes the issue where tray pieces get assigned valid board positions, preventing AI placement
         Debug.Log("🔧 PRE-PLACEMENT FIX: Validating and repairing tray piece positions...");
         ValidateAndRepairTrayPositions();
-        
-        // COMPREHENSIVE DEBUG STATE
+
+        // Get all active players
+        List<PieceColor> activePlayers = PlayerManager.Instance.GetActivePlayers();
         Debug.Log($"🔍 SYSTEM STATE CHECK:");
         Debug.Log($"  GameState: {(GameStateManager.Instance?.currentState.ToString() ?? "NULL")}");
         Debug.Log($"  TurnManager Game Mode: {TurnManager.Instance.GetGameModeDescription()}");
-        Debug.Log($"  White IsPlayerAI: {TurnManager.Instance.IsPlayerAI(PieceColor.White)}");
-        Debug.Log($"  Black IsPlayerAI: {TurnManager.Instance.IsPlayerAI(PieceColor.Black)}");
-        Debug.Log($"  White PlayerType: {TurnManager.Instance.GetPlayerType(PieceColor.White)}");
-        Debug.Log($"  Black PlayerType: {TurnManager.Instance.GetPlayerType(PieceColor.Black)}");
+        Debug.Log($"  Active player count: {activePlayers.Count}");
         Debug.Log($"  AIPlayer.Instance: {(AIPlayer.Instance != null ? "✅ EXISTS" : "❌ NULL")}");
         Debug.Log($"  Time: {Time.time:F3}s");
-        
-        // Trigger AI placement for White if it's an AI player
-        if (TurnManager.Instance.IsPlayerAI(PieceColor.White))
+
+        // Trigger AI placement for each AI player
+        foreach (PieceColor playerColor in activePlayers)
         {
-            Debug.Log("🤖 PlacementManager: Starting White AI placement asynchronously");
-            if (AIPlayer.Instance != null)
+            bool isAI = TurnManager.Instance.IsPlayerAI(playerColor);
+            Debug.Log($"  {playerColor} - IsPlayerAI: {isAI}, PlayerType: {TurnManager.Instance.GetPlayerType(playerColor)}");
+
+            if (isAI)
             {
-                AIPlayer.Instance.RequestPlacement(PieceColor.White);
-                Debug.Log("✅ PlacementManager: White AI placement request sent");
+                Debug.Log($"🤖 PlacementManager: Starting {playerColor} AI placement asynchronously");
+                if (AIPlayer.Instance != null)
+                {
+                    AIPlayer.Instance.RequestPlacement(playerColor);
+                    Debug.Log($"✅ PlacementManager: {playerColor} AI placement request sent");
+                }
+                else
+                {
+                    Debug.LogError($"🚨 PlacementManager: Cannot request {playerColor} AI placement - AIPlayer.Instance is NULL");
+                }
             }
             else
             {
-                Debug.LogError("🚨 PlacementManager: Cannot request White AI placement - AIPlayer.Instance is NULL");
+                Debug.Log($"👤 PlacementManager: {playerColor} is HUMAN player - no AI placement needed");
             }
         }
-        else
-        {
-            Debug.Log("👤 PlacementManager: White is HUMAN player - no AI placement needed");
-        }
-        
-        // Trigger AI placement for Black if it's an AI player
-        if (TurnManager.Instance.IsPlayerAI(PieceColor.Black))
-        {
-            Debug.Log("🤖 PlacementManager: Starting Black AI placement asynchronously");
-            if (AIPlayer.Instance != null)
-            {
-                AIPlayer.Instance.RequestPlacement(PieceColor.Black);
-                Debug.Log("✅ PlacementManager: Black AI placement request sent");
-            }
-            else
-            {
-                Debug.LogError("🚨 PlacementManager: Cannot request Black AI placement - AIPlayer.Instance is NULL");
-            }
-        }
-        else
-        {
-            Debug.Log("👤 PlacementManager: Black is HUMAN player - no AI placement needed");
-        }
-        
-        Debug.Log("PlacementManager: Asynchronous AI placement requests sent");
+
+        Debug.Log($"PlacementManager: Asynchronous AI placement requests sent for {activePlayers.Count} active players");
     }
     
     /// <summary>
@@ -1865,15 +2332,20 @@ public class PlacementManager : MonoBehaviour
         int sameTypeCount = 0;
         if (ChessBoard.Instance != null)
         {
-            for (int x = 0; x < 4; x++)
+            // Get dynamic board dimensions
+            Vector3Int dims = BoardDimensionsManager.Instance != null
+                ? BoardDimensionsManager.Instance.GetDimensions()
+                : new Vector3Int(4, 4, 4);
+
+            for (int x = 0; x < dims.x; x++)
             {
-                for (int y = 0; y < 4; y++)
+                for (int y = 0; y < dims.y; y++)
                 {
-                    for (int z = 0; z < 4; z++)
+                    for (int z = 0; z < dims.z; z++)
                     {
                         ChessPiece boardPiece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
-                        if (boardPiece != null && 
-                            boardPiece.pieceColor == targetPiece.pieceColor && 
+                        if (boardPiece != null &&
+                            boardPiece.pieceColor == targetPiece.pieceColor &&
                             boardPiece.pieceType == targetPiece.pieceType)
                         {
                             sameTypeCount++;
@@ -1928,16 +2400,21 @@ public class PlacementManager : MonoBehaviour
         // Count how many pieces of this type/color are already on the board
         int existingCount = 0;
         ChessPiece existingPiece = null;
-        
-        for (int x = 0; x < 4; x++)
+
+        // Get dynamic board dimensions
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
+        for (int x = 0; x < dims.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < dims.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < dims.z; z++)
                 {
                     ChessPiece boardPiece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
-                    if (boardPiece != null && 
-                        boardPiece.pieceColor == piece.pieceColor && 
+                    if (boardPiece != null &&
+                        boardPiece.pieceColor == piece.pieceColor &&
                         boardPiece.pieceType == piece.pieceType)
                     {
                         existingCount++;
@@ -2031,21 +2508,34 @@ public class PlacementManager : MonoBehaviour
     /// <summary>
     /// Check if a player has completed their placement (tray is empty)
     /// </summary>
-    private bool IsPlayerPlacementCompleted(PieceColor playerColor)
+    public bool IsPlayerPlacementCompleted(PieceColor playerColor)
     {
-        PieceTray playerTray = (playerColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
-        
+        // CRITICAL FIX: Use PieceTrayManager.GetTray() for consistency with PlacePieceOnBoard() and AIPlayer
+        PieceTray playerTray = null;
+
+        if (PieceTrayManager.Instance != null)
+        {
+            playerTray = PieceTrayManager.Instance.GetTray(playerColor);
+            Debug.Log($"🔍 IsPlayerPlacementCompleted: Using PieceTrayManager.GetTray({playerColor}) - tray instance ID: {(playerTray != null ? playerTray.GetInstanceID().ToString() : "NULL")}");
+        }
+        else
+        {
+            // Fallback for 2-player games
+            playerTray = (playerColor == PieceColor.White) ? PieceTray.WhiteTray : PieceTray.BlackTray;
+            Debug.LogWarning($"⚠️ IsPlayerPlacementCompleted: PieceTrayManager null, using static tray for {playerColor}");
+        }
+
         if (playerTray == null)
         {
             Debug.LogWarning($"PlacementManager: {playerColor} tray is null - assuming completed");
             return true;
         }
-        
+
         int piecesInTray = playerTray.GetPieceCount();
         bool completed = piecesInTray == 0;
-        
-        Debug.Log($"PlacementManager: {playerColor} placement completion check - pieces in tray: {piecesInTray}, completed: {completed}");
-        
+
+        Debug.Log($"PlacementManager: {playerColor} placement completion check - tray instance {playerTray.GetInstanceID()}, pieces in tray: {piecesInTray}, completed: {completed}");
+
         return completed;
     }
     
@@ -2063,13 +2553,18 @@ public class PlacementManager : MonoBehaviour
         
         int whitePieces = 0;
         int blackPieces = 0;
-        
+
+        // Get dynamic board dimensions
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
         // Count placed pieces by color
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < dims.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < dims.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < dims.z; z++)
                 {
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
                     if (piece != null)
@@ -2108,13 +2603,18 @@ public class PlacementManager : MonoBehaviour
         }
         
         bool hasKing = false;
-        
+
+        // Get dynamic board dimensions
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
         // Search for essential pieces
-        for (int x = 0; x < 4; x++)
+        for (int x = 0; x < dims.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < dims.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < dims.z; z++)
                 {
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(new BoardPosition(x, y, z));
                     if (piece != null && piece.pieceColor == playerColor)
@@ -2134,77 +2634,67 @@ public class PlacementManager : MonoBehaviour
     
     /// <summary>
     /// Validate and repair tray piece positions to ensure AI placement can find available pieces
-    /// Critical fix for Human vs AI mode where tray pieces get corrupted with valid board positions
+    /// Critical fix for all player colors where tray pieces get corrupted with valid board positions
+    /// SCALABILITY FIX: Now supports all 6 player colors (White/Black/Green/Purple/Yellow/Orange)
     /// </summary>
     private void ValidateAndRepairTrayPositions()
     {
-        Debug.Log("🔧 ValidateAndRepairTrayPositions: Starting tray piece validation and repair...");
-        
+        Debug.Log("🔧 ValidateAndRepairTrayPositions: Starting tray piece validation and repair for all active players...");
+
         int repairedPieces = 0;
-        int corruptedPieces = 0;
-        
-        // Check White Tray
-        if (PieceTray.WhiteTray != null)
+        int totalPiecesChecked = 0;
+
+        // Get all active players from PlayerManager
+        if (PlayerManager.Instance == null)
         {
-            Debug.Log("🔧 Checking White Tray pieces...");
-            ChessPiece[] whiteTrayPieces = PieceTray.WhiteTray.GetComponentsInChildren<ChessPiece>();
-            
-            foreach (ChessPiece piece in whiteTrayPieces)
+            Debug.LogError("🚨 ValidateAndRepairTrayPositions: PlayerManager.Instance is NULL - cannot get active players!");
+            return;
+        }
+
+        List<PieceColor> activePlayers = PlayerManager.Instance.GetActivePlayers();
+        Debug.Log($"🔧 ValidateAndRepairTrayPositions: Checking {activePlayers.Count} active player trays");
+
+        // Check all active player trays using dynamic tray lookup
+        foreach (PieceColor playerColor in activePlayers)
+        {
+            PieceTray playerTray = PieceTray.GetTrayForColor(playerColor);
+
+            if (playerTray != null)
             {
-                if (piece.CurrentPosition.IsValid())
+                Debug.Log($"🔧 Checking {playerColor} Tray pieces...");
+                ChessPiece[] trayPieces = playerTray.GetComponentsInChildren<ChessPiece>();
+                Debug.Log($"🔧 Found {trayPieces.Length} pieces in {playerColor} tray");
+
+                foreach (ChessPiece piece in trayPieces)
                 {
-                    Debug.LogError($"🚨 CORRUPTION DETECTED: White tray piece {piece.pieceType} has VALID position {piece.CurrentPosition} - should be invalid!");
-                    Debug.LogError($"🚨 This prevents AI placement from finding available pieces!");
-                    
-                    // Force reset to invalid position
-                    piece.SetCurrentPosition(new BoardPosition(-1, -1, -1));
-                    repairedPieces++;
-                    
-                    Debug.Log($"✅ REPAIRED: Reset {piece.pieceColor} {piece.pieceType} to invalid position");
-                }
-                else
-                {
-                    Debug.Log($"✅ OK: White {piece.pieceType} has correct invalid position {piece.CurrentPosition}");
+                    totalPiecesChecked++;
+
+                    if (piece.CurrentPosition.IsValid())
+                    {
+                        Debug.LogError($"🚨 CORRUPTION DETECTED: {playerColor} tray piece {piece.pieceType} has VALID position {piece.CurrentPosition} - should be invalid!");
+                        Debug.LogError($"🚨 This prevents AI placement from finding available pieces!");
+
+                        // Force reset to invalid position
+                        piece.SetCurrentPosition(new BoardPosition(-1, -1, -1));
+                        repairedPieces++;
+
+                        Debug.Log($"✅ REPAIRED: Reset {piece.pieceColor} {piece.pieceType} to invalid position");
+                    }
+                    else
+                    {
+                        Debug.Log($"✅ OK: {playerColor} {piece.pieceType} has correct invalid position {piece.CurrentPosition}");
+                    }
                 }
             }
-        }
-        else
-        {
-            Debug.LogError("🚨 White Tray not found!");
-        }
-        
-        // Check Black Tray
-        if (PieceTray.BlackTray != null)
-        {
-            Debug.Log("🔧 Checking Black Tray pieces...");
-            ChessPiece[] blackTrayPieces = PieceTray.BlackTray.GetComponentsInChildren<ChessPiece>();
-            
-            foreach (ChessPiece piece in blackTrayPieces)
+            else
             {
-                if (piece.CurrentPosition.IsValid())
-                {
-                    Debug.LogError($"🚨 CORRUPTION DETECTED: Black tray piece {piece.pieceType} has VALID position {piece.CurrentPosition} - should be invalid!");
-                    Debug.LogError($"🚨 This prevents AI placement from finding available pieces!");
-                    
-                    // Force reset to invalid position
-                    piece.SetCurrentPosition(new BoardPosition(-1, -1, -1));
-                    repairedPieces++;
-                    
-                    Debug.Log($"✅ REPAIRED: Reset {piece.pieceColor} {piece.pieceType} to invalid position");
-                }
-                else
-                {
-                    Debug.Log($"✅ OK: Black {piece.pieceType} has correct invalid position {piece.CurrentPosition}");
-                }
+                Debug.LogError($"🚨 {playerColor} Tray not found!");
             }
         }
-        else
-        {
-            Debug.LogError("🚨 Black Tray not found!");
-        }
-        
-        Debug.Log($"🔧 ValidateAndRepairTrayPositions COMPLETE: Repaired {repairedPieces} pieces, {corruptedPieces} remain corrupted");
-        
+
+        Debug.Log($"🔧 ValidateAndRepairTrayPositions COMPLETE: Checked {totalPiecesChecked} pieces across {activePlayers.Count} trays");
+        Debug.Log($"🔧 Repaired {repairedPieces} corrupted tray pieces");
+
         if (repairedPieces > 0)
         {
             Debug.Log($"✅ TRAY REPAIR SUCCESS: Fixed {repairedPieces} tray pieces - AI placement should now work!");
@@ -2247,9 +2737,9 @@ public class PlacementManager : MonoBehaviour
         
         if (savedHumanSelectedPiece != null)
         {
-            // Verify the saved piece is still in a tray (not placed by AI)
-            bool isPieceStillInTray = savedHumanSelectedPiece.transform.IsChildOf(PieceTray.WhiteTray?.transform) || 
-                                     savedHumanSelectedPiece.transform.IsChildOf(PieceTray.BlackTray?.transform);
+            // Verify the saved piece is still in a tray (not placed by AI) - supports all 6 player colors
+            PieceTray savedPieceTray = PieceTray.GetTrayForColor(savedHumanSelectedPiece.pieceColor);
+            bool isPieceStillInTray = (savedPieceTray != null && savedHumanSelectedPiece.transform.IsChildOf(savedPieceTray.transform));
             
             if (isPieceStillInTray)
             {

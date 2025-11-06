@@ -17,7 +17,12 @@ public struct BoardPosition : IEquatable<BoardPosition>
     
     public bool IsValid()
     {
-        return x >= 0 && x < 4 && y >= 0 && y < 4 && z >= 0 && z < 4;
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int dims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 if manager not available
+
+        return x >= 0 && x < dims.x && y >= 0 && y < dims.y && z >= 0 && z < dims.z;
     }
     
     public Vector3 ToWorldPosition(float cellSize = 1f, Vector3 boardOrigin = default)

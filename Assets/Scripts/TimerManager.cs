@@ -1,5 +1,7 @@
 using UnityEngine;
 using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 
 /// <summary>
 /// Manages timed play functionality for 3D Chess games.
@@ -14,10 +16,9 @@ public class TimerManager : MonoBehaviour
     
     [Header("Debug")]
     public bool debugMode = false;
-    
-    // Timer state
-    private float whiteTimeRemaining = 0f; // Seconds remaining for White
-    private float blackTimeRemaining = 0f; // Seconds remaining for Black
+
+    // Timer state - MULTI-PLAYER SUPPORT: Track time for all active players (2-6)
+    private Dictionary<PieceColor, float> playerTimeRemaining = new Dictionary<PieceColor, float>();
     private bool timerActive = false;
     private PieceColor activeTimerPlayer = PieceColor.White;
     
@@ -102,10 +103,20 @@ public class TimerManager : MonoBehaviour
                 Debug.LogWarning("🕒 TimerManager: APPLYING FALLBACK CONFIGURATION FOR TESTING (GameConfig NULL)");
                 enableTimedPlay = true;
                 timePerPlayerMinutes = 10;
-                whiteTimeRemaining = 600f; // 10 minutes in seconds
-                blackTimeRemaining = 600f;
+
+                // Initialize timers for all active players
+                List<PieceColor> activePlayers = PlayerManager.Instance != null
+                    ? PlayerManager.Instance.GetActivePlayers()
+                    : new List<PieceColor> { PieceColor.White, PieceColor.Black };
+
+                playerTimeRemaining.Clear();
+                foreach (PieceColor player in activePlayers)
+                {
+                    playerTimeRemaining[player] = 600f; // 10 minutes in seconds
+                }
+
                 isInitialized = true;
-                Debug.LogWarning("🕒 TimerManager: Fallback applied - enableTimedPlay: True, 10 minutes per player");
+                Debug.LogWarning($"🕒 TimerManager: Fallback applied - enableTimedPlay: True, 10 minutes for {activePlayers.Count} players");
             }
         }
         else
@@ -117,15 +128,26 @@ public class TimerManager : MonoBehaviour
             Debug.LogWarning("🕒 TimerManager: APPLYING FALLBACK CONFIGURATION FOR TESTING");
             enableTimedPlay = true;
             timePerPlayerMinutes = 10;
-            whiteTimeRemaining = 600f; // 10 minutes in seconds
-            blackTimeRemaining = 600f;
+
+            // Initialize timers for all active players
+            List<PieceColor> activePlayers = PlayerManager.Instance != null
+                ? PlayerManager.Instance.GetActivePlayers()
+                : new List<PieceColor> { PieceColor.White, PieceColor.Black };
+
+            playerTimeRemaining.Clear();
+            foreach (PieceColor player in activePlayers)
+            {
+                playerTimeRemaining[player] = 600f; // 10 minutes in seconds
+            }
+
             isInitialized = true;
-            Debug.LogWarning("🕒 TimerManager: Fallback applied - enableTimedPlay: True, 10 minutes per player");
+            Debug.LogWarning($"🕒 TimerManager: Fallback applied - enableTimedPlay: True, 10 minutes for {activePlayers.Count} players");
         }
     }
     
     /// <summary>
     /// Apply timer configuration settings
+    /// MULTI-PLAYER SUPPORT: Initializes timers for all active players (2-6)
     /// </summary>
     public void ApplyTimerConfiguration(GameConfiguration config)
     {
@@ -134,20 +156,41 @@ public class TimerManager : MonoBehaviour
             Debug.LogWarning("TimerManager: Received null configuration");
             return;
         }
-        
+
         enableTimedPlay = config.enableTimedPlay;
         timePerPlayerMinutes = config.timePerPlayerMinutes;
-        
-        // Convert minutes to seconds and set initial time for both players
+
+        // Get all active players
+        List<PieceColor> activePlayers = new List<PieceColor>();
+        if (PlayerManager.Instance != null)
+        {
+            activePlayers = PlayerManager.Instance.GetActivePlayers();
+        }
+        else
+        {
+            // Fallback to 2-player mode
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+        }
+
+        // Convert minutes to seconds and set initial time for all active players
         float initialTimeSeconds = timePerPlayerMinutes * 60f;
-        whiteTimeRemaining = initialTimeSeconds;
-        blackTimeRemaining = initialTimeSeconds;
-        
+        playerTimeRemaining.Clear();
+
+        foreach (PieceColor player in activePlayers)
+        {
+            playerTimeRemaining[player] = initialTimeSeconds;
+        }
+
         isInitialized = true;
-        
+
         Debug.Log($"🕒 TimerManager: Applied configuration - Timed Play: {enableTimedPlay}");
         Debug.Log($"🕒   Time per player: {timePerPlayerMinutes} minutes ({initialTimeSeconds} seconds)");
-        Debug.Log($"🕒   White time: {whiteTimeRemaining}s, Black time: {blackTimeRemaining}s");
+        Debug.Log($"🕒   Initialized timers for {activePlayers.Count} players:");
+        foreach (var kvp in playerTimeRemaining)
+        {
+            Debug.Log($"🕒     {kvp.Key}: {kvp.Value}s");
+        }
         Debug.Log($"🕒   isInitialized set to: {isInitialized}");
     }
     
@@ -235,6 +278,7 @@ public class TimerManager : MonoBehaviour
     
     /// <summary>
     /// Main timer countdown coroutine
+    /// MULTI-PLAYER SUPPORT: Works for any active player
     /// </summary>
     private IEnumerator TimerCountdown()
     {
@@ -242,7 +286,7 @@ public class TimerManager : MonoBehaviour
         {
             // Get current remaining time
             float currentTime = GetRemainingTime(activeTimerPlayer);
-            
+
             if (currentTime <= 0f)
             {
                 // Time expired
@@ -251,37 +295,40 @@ public class TimerManager : MonoBehaviour
                 timerActive = false;
                 yield break;
             }
-            
+
             // Check for low time warning (under 60 seconds)
             if (currentTime <= 60f && currentTime > 59f)
             {
                 Debug.Log($"⚠️ TimerManager: Low time warning for {activeTimerPlayer} (under 1 minute)");
                 OnLowTimeWarning?.Invoke(activeTimerPlayer);
             }
-            
-            // Update timer
-            if (activeTimerPlayer == PieceColor.White)
+
+            // Update timer for active player using dictionary
+            if (playerTimeRemaining.ContainsKey(activeTimerPlayer))
             {
-                whiteTimeRemaining -= Time.deltaTime;
+                playerTimeRemaining[activeTimerPlayer] -= Time.deltaTime;
             }
             else
             {
-                blackTimeRemaining -= Time.deltaTime;
+                Debug.LogError($"⏰ TimerManager: Active player {activeTimerPlayer} not found in timer dictionary!");
+                timerActive = false;
+                yield break;
             }
-            
+
             // Fire update event
             OnTimerUpdated?.Invoke(activeTimerPlayer, currentTime);
-            
+
             yield return null; // Wait one frame
         }
     }
     
     /// <summary>
     /// Get remaining time for a player in seconds
+    /// MULTI-PLAYER SUPPORT: Returns time for any player color
     /// </summary>
     public float GetRemainingTime(PieceColor player)
     {
-        return player == PieceColor.White ? whiteTimeRemaining : blackTimeRemaining;
+        return playerTimeRemaining.ContainsKey(player) ? playerTimeRemaining[player] : 0f;
     }
     
     /// <summary>
@@ -346,21 +393,54 @@ public class TimerManager : MonoBehaviour
     
     /// <summary>
     /// Get debug information about timer state
+    /// MULTI-PLAYER SUPPORT: Shows all active player timers
     /// </summary>
     public string GetDebugInfo()
     {
         if (!enableTimedPlay) return "Timed Play: Disabled";
-        
+
         string info = $"Timed Play: Enabled ({timePerPlayerMinutes} min per player)\\n";
-        info += $"White time: {GetFormattedTime(PieceColor.White)} ({whiteTimeRemaining:F1}s)\\n";
-        info += $"Black time: {GetFormattedTime(PieceColor.Black)} ({blackTimeRemaining:F1}s)\\n";
+
+        // Show all player times
+        foreach (var kvp in playerTimeRemaining)
+        {
+            info += $"{kvp.Key} time: {GetFormattedTime(kvp.Key)} ({kvp.Value:F1}s)\\n";
+        }
+
         info += $"Active timer: {activeTimerPlayer}\\n";
         info += $"Timer running: {timerActive}\\n";
         info += $"Initialized: {isInitialized}";
-        
+
         return info;
     }
-    
+
+    /// <summary>
+    /// Check if a specific player has an active timer
+    /// MULTI-PLAYER SUPPORT: Used by UI to determine which timers to display
+    /// </summary>
+    public bool HasActiveTimer(PieceColor color)
+    {
+        return playerTimeRemaining.ContainsKey(color);
+    }
+
+    /// <summary>
+    /// Get array of all player colors that have active timers
+    /// MULTI-PLAYER SUPPORT: Used by UI to create timer displays dynamically
+    /// </summary>
+    public PieceColor[] GetActivePlayerColors()
+    {
+        return playerTimeRemaining.Keys.ToArray();
+    }
+
+    /// <summary>
+    /// Get all timer states for debugging
+    /// MULTI-PLAYER SUPPORT: Returns dictionary of all player times
+    /// </summary>
+    public Dictionary<PieceColor, float> GetAllTimerStates()
+    {
+        return new Dictionary<PieceColor, float>(playerTimeRemaining);
+    }
+
     /// <summary>
     /// Handle chaos rotation started - pause timer to prevent unfair time consumption
     /// </summary>

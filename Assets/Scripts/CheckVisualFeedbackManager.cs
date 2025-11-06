@@ -404,18 +404,23 @@ public class CheckVisualFeedbackManager : MonoBehaviour
     private ChessPiece FindKing(PieceColor kingColor)
     {
         if (ChessBoard.Instance == null) return null;
-        
-        for (int x = 0; x < 4; x++)
+
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
+
+        for (int x = 0; x < boardDimensions.x; x++)
         {
-            for (int y = 0; y < 4; y++)
+            for (int y = 0; y < boardDimensions.y; y++)
             {
-                for (int z = 0; z < 4; z++)
+                for (int z = 0; z < boardDimensions.z; z++)
                 {
                     BoardPosition pos = new BoardPosition(x, y, z);
                     ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
-                    
-                    if (piece != null && 
-                        piece.pieceType == ChessPieceType.King && 
+
+                    if (piece != null &&
+                        piece.pieceType == ChessPieceType.King &&
                         piece.pieceColor == kingColor)
                     {
                         return piece;
@@ -423,7 +428,7 @@ public class CheckVisualFeedbackManager : MonoBehaviour
                 }
             }
         }
-        
+
         return null;
     }
     

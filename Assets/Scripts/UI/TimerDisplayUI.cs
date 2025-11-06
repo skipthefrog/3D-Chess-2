@@ -1,6 +1,8 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System.Collections.Generic;
+using System.Linq;
 
 /// <summary>
 /// Displays countdown timers for timed play mode in the upper-left corner of the game screen.
@@ -25,8 +27,7 @@ public class TimerDisplayUI : MonoBehaviour
     // UI Components
     private Canvas timerCanvas;
     private GameObject timerPanel;
-    private TextMeshProUGUI whiteTimerText;
-    private TextMeshProUGUI blackTimerText;
+    private Dictionary<PieceColor, TextMeshProUGUI> playerTimerTexts = new Dictionary<PieceColor, TextMeshProUGUI>(); // MULTI-PLAYER SUPPORT
     private Image backgroundImage;
     
     // State tracking
@@ -89,75 +90,129 @@ public class TimerDisplayUI : MonoBehaviour
     
     /// <summary>
     /// Create the timer UI in the upper-left corner
+    /// MULTI-PLAYER SUPPORT: Dynamically creates timer displays for 2-6 players
     /// </summary>
     private void CreateTimerUI()
     {
         Debug.Log("🕒 TimerDisplayUI: CreateTimerUI - Starting timer UI creation...");
-        
+
         // Create canvas for timer display
         GameObject canvasObj = new GameObject("TimerCanvas");
         canvasObj.transform.SetParent(transform, false);
-        
+
         timerCanvas = canvasObj.AddComponent<Canvas>();
         timerCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
         timerCanvas.sortingOrder = 130; // Highest priority - above check status UI (110) and menu UI (120)
-        
+
         CanvasScaler scaler = canvasObj.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920, 1080);
-        
+
         // Create timer panel in upper-left corner
         timerPanel = new GameObject("TimerPanel");
         timerPanel.transform.SetParent(canvasObj.transform, false);
-        
+
         RectTransform panelRect = timerPanel.AddComponent<RectTransform>();
         panelRect.anchorMin = new Vector2(0f, 0.85f); // Moved lower to avoid status bar overlap
-        panelRect.anchorMax = new Vector2(0.16f, 0.98f);  // 16% width (further reduced from 22%), minimal screen space
+        panelRect.anchorMax = new Vector2(0.16f, 0.98f);  // 16% width, minimal screen space
         panelRect.sizeDelta = Vector2.zero;
         panelRect.anchoredPosition = Vector2.zero;
-        
+
         // Add background
         backgroundImage = timerPanel.AddComponent<Image>();
         backgroundImage.color = backgroundColor;
-        
-        // Create White timer text
-        GameObject whiteTimerObj = new GameObject("WhiteTimer");
-        whiteTimerObj.transform.SetParent(timerPanel.transform, false);
-        
-        RectTransform whiteRect = whiteTimerObj.AddComponent<RectTransform>();
-        whiteRect.anchorMin = new Vector2(0.02f, 0.5f); // Top half of panel, wider margins
-        whiteRect.anchorMax = new Vector2(0.98f, 0.95f); // Use nearly full width
-        whiteRect.sizeDelta = Vector2.zero;
-        whiteRect.anchoredPosition = Vector2.zero;
-        
-        whiteTimerText = whiteTimerObj.AddComponent<TextMeshProUGUI>();
-        whiteTimerText.text = "White: 10:00";
-        whiteTimerText.fontSize = fontSize;
-        whiteTimerText.color = normalTimeColor;
-        whiteTimerText.alignment = TextAlignmentOptions.Center;
-        whiteTimerText.font = Resources.Load<TMP_FontAsset>("LiberationSans SDF");
-        
-        // Create Black timer text
-        GameObject blackTimerObj = new GameObject("BlackTimer");
-        blackTimerObj.transform.SetParent(timerPanel.transform, false);
-        
-        RectTransform blackRect = blackTimerObj.AddComponent<RectTransform>();
-        blackRect.anchorMin = new Vector2(0.02f, 0.05f); // Bottom half of panel, wider margins
-        blackRect.anchorMax = new Vector2(0.98f, 0.45f); // Use nearly full width
-        blackRect.sizeDelta = Vector2.zero;
-        blackRect.anchoredPosition = Vector2.zero;
-        
-        blackTimerText = blackTimerObj.AddComponent<TextMeshProUGUI>();
-        blackTimerText.text = "Black: 10:00";
-        blackTimerText.fontSize = fontSize;
-        blackTimerText.color = normalTimeColor;
-        blackTimerText.alignment = TextAlignmentOptions.Center;
-        blackTimerText.font = Resources.Load<TMP_FontAsset>("LiberationSans SDF");
-        
+
+        // Get all active players
+        List<PieceColor> activePlayers = new List<PieceColor>();
+        if (PlayerManager.Instance != null)
+        {
+            activePlayers = PlayerManager.Instance.GetActivePlayers();
+        }
+        else
+        {
+            // Fallback to 2-player mode
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+        }
+
+        int playerCount = activePlayers.Count;
+        Debug.Log($"🕒 TimerDisplayUI: Creating timer displays for {playerCount} players");
+
+        // Determine layout based on player count
+        int rows, cols;
+        int timerFontSize;
+
+        if (playerCount <= 2)
+        {
+            // 2-player: Vertical stack
+            rows = 2;
+            cols = 1;
+            timerFontSize = 48;
+        }
+        else if (playerCount <= 4)
+        {
+            // 4-player: 2x2 grid
+            rows = 2;
+            cols = 2;
+            timerFontSize = 36;
+        }
+        else
+        {
+            // 6-player: 2x3 grid (2 rows, 3 columns)
+            rows = 2;
+            cols = 3;
+            timerFontSize = 28;
+        }
+
+        // Create timer text for each active player
+        float marginX = 0.02f;
+        float marginY = 0.02f;
+        float cellWidth = (1f - (marginX * 2f)) / cols;
+        float cellHeight = (1f - (marginY * 2f)) / rows;
+
+        for (int i = 0; i < activePlayers.Count; i++)
+        {
+            PieceColor player = activePlayers[i];
+
+            // Calculate grid position
+            int row = i / cols;
+            int col = i % cols;
+
+            // Create timer object
+            GameObject timerObj = new GameObject($"{player}Timer");
+            timerObj.transform.SetParent(timerPanel.transform, false);
+
+            RectTransform timerRect = timerObj.AddComponent<RectTransform>();
+
+            // Calculate anchors for grid layout (top-to-bottom, left-to-right)
+            float anchorMinX = marginX + (col * cellWidth);
+            float anchorMaxX = anchorMinX + cellWidth;
+            float anchorMinY = 1f - marginY - ((row + 1) * cellHeight); // Top to bottom
+            float anchorMaxY = 1f - marginY - (row * cellHeight);
+
+            timerRect.anchorMin = new Vector2(anchorMinX, anchorMinY);
+            timerRect.anchorMax = new Vector2(anchorMaxX, anchorMaxY);
+            timerRect.sizeDelta = Vector2.zero;
+            timerRect.anchoredPosition = Vector2.zero;
+
+            // Create text component
+            TextMeshProUGUI timerText = timerObj.AddComponent<TextMeshProUGUI>();
+            timerText.text = $"{player}: 10:00";
+            timerText.fontSize = timerFontSize;
+            timerText.color = normalTimeColor;
+            timerText.alignment = TextAlignmentOptions.Center;
+            timerText.font = Resources.Load<TMP_FontAsset>("LiberationSans SDF");
+
+            // Store in dictionary
+            playerTimerTexts[player] = timerText;
+
+            Debug.Log($"🕒 TimerDisplayUI: Created timer for {player} at grid position ({row},{col})");
+        }
+
         Debug.Log("🕒 TimerDisplayUI: Timer UI created in upper-left corner");
         Debug.Log($"🕒 TimerDisplayUI: Canvas created with sortingOrder: {timerCanvas.sortingOrder}");
         Debug.Log($"🕒 TimerDisplayUI: Timer panel active: {timerPanel.activeSelf}");
-        Debug.Log($"🕒 TimerDisplayUI: White timer text: '{whiteTimerText.text}', Black timer text: '{blackTimerText.text}'");
+        Debug.Log($"🕒 TimerDisplayUI: Created {playerTimerTexts.Count} timer displays");
     }
     
     /// <summary>
@@ -186,7 +241,7 @@ public class TimerDisplayUI : MonoBehaviour
     /// <summary>
     /// Handle turn changes to highlight active player
     /// </summary>
-    private void OnTurnChanged(PieceColor newPlayer)
+    private void OnTurnChanged(PieceColor previousPlayer, PieceColor newPlayer)
     {
         currentActivePlayer = newPlayer;
         UpdateActivePlayerHighlight();
@@ -212,44 +267,41 @@ public class TimerDisplayUI : MonoBehaviour
     
     /// <summary>
     /// Update the timer display for a specific player
+    /// MULTI-PLAYER SUPPORT: Works for any player color
     /// </summary>
     private void UpdateTimerDisplay(PieceColor player, float secondsRemaining)
     {
         if (!isVisible) return;
-        
+
         string timeString = FormatTime(secondsRemaining);
         Color timeColor = GetTimeColor(secondsRemaining, player == currentActivePlayer);
-        
-        if (player == PieceColor.White && whiteTimerText != null)
+
+        if (playerTimerTexts.ContainsKey(player))
         {
-            whiteTimerText.text = $"White: {timeString}";
-            whiteTimerText.color = timeColor;
-        }
-        else if (player == PieceColor.Black && blackTimerText != null)
-        {
-            blackTimerText.text = $"Black: {timeString}";
-            blackTimerText.color = timeColor;
+            playerTimerTexts[player].text = $"{player}: {timeString}";
+            playerTimerTexts[player].color = timeColor;
         }
     }
     
     /// <summary>
     /// Update active player highlighting
+    /// MULTI-PLAYER SUPPORT: Updates all player timer colors
     /// </summary>
     private void UpdateActivePlayerHighlight()
     {
         if (!isVisible) return;
-        
-        // Update colors based on current active player
-        if (whiteTimerText != null)
+
+        // Update colors for all players based on current active player
+        foreach (var kvp in playerTimerTexts)
         {
-            float whiteTime = TimerManager.Instance.GetRemainingTime(PieceColor.White);
-            whiteTimerText.color = GetTimeColor(whiteTime, currentActivePlayer == PieceColor.White);
-        }
-        
-        if (blackTimerText != null)
-        {
-            float blackTime = TimerManager.Instance.GetRemainingTime(PieceColor.Black);
-            blackTimerText.color = GetTimeColor(blackTime, currentActivePlayer == PieceColor.Black);
+            PieceColor player = kvp.Key;
+            TextMeshProUGUI timerText = kvp.Value;
+
+            if (TimerManager.Instance != null)
+            {
+                float playerTime = TimerManager.Instance.GetRemainingTime(player);
+                timerText.color = GetTimeColor(playerTime, currentActivePlayer == player);
+            }
         }
     }
     
@@ -294,14 +346,15 @@ public class TimerDisplayUI : MonoBehaviour
     
     /// <summary>
     /// Show or hide the timer display
+    /// MULTI-PLAYER SUPPORT: Updates all player timers
     /// </summary>
     public void SetTimerVisibility(bool visible)
     {
         Debug.Log($"🕒 TimerDisplayUI: SetTimerVisibility called with visible={visible}");
         Debug.Log($"🕒 TimerDisplayUI: Previous isVisible state: {isVisible}");
-        
+
         isVisible = visible;
-        
+
         if (timerPanel != null)
         {
             timerPanel.SetActive(visible);
@@ -312,37 +365,44 @@ public class TimerDisplayUI : MonoBehaviour
         {
             Debug.LogError("🕒 TimerDisplayUI: Cannot set visibility - timerPanel is NULL!");
         }
-        
+
         if (visible && TimerManager.Instance != null)
         {
-            // Update display with current timer values
-            UpdateTimerDisplay(PieceColor.White, TimerManager.Instance.GetRemainingTime(PieceColor.White));
-            UpdateTimerDisplay(PieceColor.Black, TimerManager.Instance.GetRemainingTime(PieceColor.Black));
+            // Update display with current timer values for all players
+            foreach (PieceColor player in playerTimerTexts.Keys)
+            {
+                float playerTime = TimerManager.Instance.GetRemainingTime(player);
+                UpdateTimerDisplay(player, playerTime);
+            }
             UpdateActivePlayerHighlight();
         }
-        
+
         Debug.Log($"TimerDisplayUI: Timer display {(visible ? "shown" : "hidden")}");
     }
     
     /// <summary>
     /// Initialize timer display for a new game
+    /// MULTI-PLAYER SUPPORT: Initializes all active player timers
     /// </summary>
     public void InitializeForGame(GameConfiguration config)
     {
         if (config == null) return;
-        
+
         // Show timer display only if timed play is enabled
         bool shouldShow = config.enableTimedPlay;
         SetTimerVisibility(shouldShow);
-        
+
         if (shouldShow)
         {
-            // Update initial display
+            // Update initial display for all active players
             float initialTime = config.timePerPlayerMinutes * 60f;
-            UpdateTimerDisplay(PieceColor.White, initialTime);
-            UpdateTimerDisplay(PieceColor.Black, initialTime);
-            
-            Debug.Log($"TimerDisplayUI: Initialized for timed play ({config.timePerPlayerMinutes} minutes per player)");
+
+            foreach (PieceColor player in playerTimerTexts.Keys)
+            {
+                UpdateTimerDisplay(player, initialTime);
+            }
+
+            Debug.Log($"TimerDisplayUI: Initialized for timed play ({config.timePerPlayerMinutes} minutes per player, {playerTimerTexts.Count} players)");
         }
     }
     

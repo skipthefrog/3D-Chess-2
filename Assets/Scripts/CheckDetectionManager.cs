@@ -102,6 +102,43 @@ public class CheckDetectionManager : MonoBehaviour
     }
     
     /// <summary>
+    /// Check if any king on the board is currently in check
+    /// Used for determining if a move caused check
+    /// </summary>
+    /// <returns>True if any king is in check</returns>
+    public bool IsAnyKingInCheck()
+    {
+        if (!enableCheckValidation)
+        {
+            return false;
+        }
+
+        // Get all active players
+        List<PieceColor> activePlayers = new List<PieceColor>();
+        if (PlayerManager.Instance != null)
+        {
+            activePlayers = PlayerManager.Instance.GetActivePlayers();
+        }
+        else
+        {
+            // Fallback to 2-player mode
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+        }
+
+        // Check if any player's king is in check
+        foreach (PieceColor player in activePlayers)
+        {
+            if (IsKingInCheck(player))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Check if a king of the specified color is currently in check
     /// </summary>
     /// <param name="kingColor">Color of the king to check</param>
@@ -352,7 +389,47 @@ public class CheckDetectionManager : MonoBehaviour
         
         return attackingPieces;
     }
-    
+
+    /// <summary>
+    /// Get all player colors that are attacking a specific king (for multi-player conquest system)
+    /// Returns the colors of players whose pieces are attacking the king
+    /// </summary>
+    /// <param name="kingColor">Color of the king being attacked</param>
+    /// <returns>List of player colors attacking the king</returns>
+    public List<PieceColor> GetAttackingPlayers(PieceColor kingColor)
+    {
+        List<PieceColor> attackingPlayers = new List<PieceColor>();
+
+        if (!enableCheckValidation || ChessBoard.Instance == null)
+        {
+            return attackingPlayers;
+        }
+
+        // Find the king position
+        BoardPosition kingPosition = FindKingPosition(kingColor);
+        if (!kingPosition.IsValid())
+        {
+            Debug.LogWarning($"CheckDetectionManager.GetAttackingPlayers: No {kingColor} king found");
+            return attackingPlayers;
+        }
+
+        // Get all pieces attacking the king
+        List<ChessPiece> attackingPieces = GetAttackingPieces(kingPosition);
+
+        // Extract unique player colors from attacking pieces
+        foreach (ChessPiece attacker in attackingPieces)
+        {
+            if (!attackingPlayers.Contains(attacker.pieceColor))
+            {
+                attackingPlayers.Add(attacker.pieceColor);
+            }
+        }
+
+        Debug.Log($"🎯 CONQUEST: {kingColor} king at {kingPosition} is being attacked by {attackingPlayers.Count} player(s): {string.Join(", ", attackingPlayers)}");
+
+        return attackingPlayers;
+    }
+
     /// <summary>
     /// Get comprehensive threat information for a king in check
     /// </summary>

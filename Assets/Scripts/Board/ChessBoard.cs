@@ -204,7 +204,7 @@ public class ChessBoard : MonoBehaviour
         
         if (darkSquareMaterial == null)
         {
-            darkSquareMaterial = CreateMaterial(new Color(0.4f, 0.4f, 0.4f), 0.8f);
+            darkSquareMaterial = CreateMaterial(new Color(0.15f, 0.15f, 0.15f), 0.8f);
             Debug.Log("ChessBoard: Created dark square material");
         }
         
@@ -675,7 +675,10 @@ public class ChessBoard : MonoBehaviour
         
         // TURN SYSTEM: Switch turns after successful move (only during Playing phase)
         // Skip turn switching for promotion moves as PawnPromotionManager handles it
-        if (!isPromotion && GameStateManager.Instance != null && GameStateManager.Instance.CanMovePieces())
+        // CRITICAL FIX: Don't check CanMovePieces() here as it checks for animations
+        // The piece might already be animating, which would block NextTurn() from being called
+        // NextTurn() has its own guard conditions to ensure we're in the right state
+        if (!isPromotion && GameStateManager.Instance != null && GameStateManager.Instance.currentState == GameState.Playing)
         {
             if (TurnManager.Instance != null)
             {
@@ -688,7 +691,27 @@ public class ChessBoard : MonoBehaviour
                 Debug.LogWarning("ChessBoard.MovePiece: TurnManager not available for turn switching");
             }
         }
-        
+
+        // CHESS NOTATION UI: Notify UI systems about the move
+        if (!isPromotion)
+        {
+            bool wasCapture = (targetPiece != null);
+            bool causedCheck = CheckDetectionManager.Instance != null && CheckDetectionManager.Instance.IsAnyKingInCheck();
+            bool causedCheckmate = false; // Will be updated by GameEndDetectionManager events
+
+            // Update status bar with last move
+            if (PersistentCheckStatusUI.Instance != null)
+            {
+                PersistentCheckStatusUI.Instance.SetLastMove(piece, from, to, wasCapture);
+            }
+
+            // Record move in move history
+            if (MoveHistoryUI.Instance != null)
+            {
+                MoveHistoryUI.Instance.RecordMove(piece, from, to, wasCapture, causedCheck, causedCheckmate);
+            }
+        }
+
         return true;
     }
     
@@ -897,12 +920,15 @@ public class ChessBoard : MonoBehaviour
     }
     
     /// <summary>
-    /// Check if a piece can be placed at the specified position during placement phase with X-layer validation.
-    /// This method enforces placement zone rules: White pieces only in X=0, Black pieces only in X=3.
+    /// Check if a piece can be placed at the specified position during placement phase with zone validation.
+    /// This method enforces placement zone rules with Y/Z restrictions on larger boards:
+    /// - 4x4x4: White X=0, Black X=3 (full YZ plane)
+    /// - 6x6x6: Players 1&2 in top 3 Y-rows (Y=3-5), Players 3&4 in bottom 3 Y-rows (Y=0-2), full Z
+    /// - 8x8x8: All players in middle 4x4 grid (Y=2-5, Z=2-5)
     /// </summary>
     /// <param name="position">The board position to check</param>
     /// <param name="pieceColor">The color of the piece being placed</param>
-    /// <returns>True if the position is valid, empty, and in the correct X-layer for the piece color</returns>
+    /// <returns>True if the position is valid, empty, and in the correct placement zone for the piece color</returns>
     public bool CanPlacePieceAt(BoardPosition position, PieceColor pieceColor)
     {
         // First check basic placement rules (bounds and emptiness)
@@ -910,18 +936,18 @@ public class ChessBoard : MonoBehaviour
         {
             return false; // Already logged in base method
         }
-        
-        // Check X-layer restrictions during placement phase
+
+        // Check placement zone restrictions during placement phase
         if (GameStateManager.Instance != null && GameStateManager.Instance.currentState == GameState.PiecePlacement)
         {
-            int requiredX = PlacementManager.GetValidXForColor(pieceColor);
-            if (position.x != requiredX)
+            if (!PlacementManager.IsPositionInColorZone(position, pieceColor))
             {
-                Debug.Log($"ChessBoard.CanPlacePieceAt: {pieceColor} pieces can only be placed in X={requiredX} layer, but position {position} is in X={position.x} - placement blocked");
+                PlacementZone zone = PlacementManager.GetPlacementZoneForColor(pieceColor);
+                Debug.Log($"ChessBoard.CanPlacePieceAt: {pieceColor} pieces must be placed in zone X=[{zone.xMin}-{zone.xMax}], Y=[{zone.yMin}-{zone.yMax}], Z=[{zone.zMin}-{zone.zMax}], but position {position} is outside zone - placement blocked");
                 return false;
             }
         }
-        
+
         Debug.Log($"ChessBoard.CanPlacePieceAt: Position {position} is valid for {pieceColor} piece placement");
         return true;
     }
@@ -1402,14 +1428,10 @@ public class ChessBoard : MonoBehaviour
         
         // Validate board state after rotation
         ValidateBoardConsistency();
-        
-        // Update check detection after chaos event
-        if (CheckDetectionManager.Instance != null)
-        {
-            CheckDetectionManager.Instance.InvalidateCache();
-            CheckDetectionManager.Instance.SafeUpdateVisualFeedback();
-        }
-        
+
+        // Note: Check detection is now handled by ChaosRotationManager after ALL rotations complete
+        // (not here, since this is called multiple times for multi-spin chaos events)
+
         Debug.Log("🌪️ ChessBoard.ApplyChaosRotation: Rotation completed successfully");
     }
     
@@ -1493,14 +1515,14 @@ public class ChessBoard : MonoBehaviour
     /// <returns>Coroutine for animation</returns>
     public System.Collections.IEnumerator ApplyFaceRotation(CubeFace face, bool clockwise, float animationDuration = 2.0f)
     {
-        Debug.Log($"🌪️ ChessBoard.ApplyFaceRotation: Rotating {face} face {(clockwise ? "clockwise" : "counter-clockwise")}");
-        
+        Debug.Log($"🌪️ ChessBoard.ApplyFaceRotation: Rotating {face} face {(clockwise ? "clockwise" : "counter-clockwise")} on {boardDimensions.x}x{boardDimensions.y}x{boardDimensions.z} board");
+
         // Get positions on this face
         List<BoardPosition> facePositions = GetFacePositions(face);
-        
-        // Calculate rotation mapping
-        Dictionary<BoardPosition, BoardPosition> rotationMap = ChaosMath.RotateFacePositions(facePositions, face, clockwise);
-        
+
+        // Calculate rotation mapping with board dimensions for multi-board support
+        Dictionary<BoardPosition, BoardPosition> rotationMap = ChaosMath.RotateFacePositions(facePositions, face, clockwise, boardDimensions);
+
         // Apply the rotation
         yield return StartCoroutine(ApplyChaosRotation(rotationMap, animationDuration));
     }
@@ -1515,14 +1537,14 @@ public class ChessBoard : MonoBehaviour
     /// <returns>Coroutine for animation</returns>
     public System.Collections.IEnumerator ApplyLayerRotation(RotationAxis axis, int layer, bool clockwise, float animationDuration = 2.0f)
     {
-        Debug.Log($"🌪️ ChessBoard.ApplyLayerRotation: Rotating {axis}-axis layer {layer} {(clockwise ? "clockwise" : "counter-clockwise")}");
-        
+        Debug.Log($"🌪️ ChessBoard.ApplyLayerRotation: Rotating {axis}-axis layer {layer} {(clockwise ? "clockwise" : "counter-clockwise")} on {boardDimensions.x}x{boardDimensions.y}x{boardDimensions.z} board");
+
         // Get positions on this layer
         List<BoardPosition> layerPositions = GetLayerPositions(axis, layer);
-        
-        // Calculate rotation mapping
-        Dictionary<BoardPosition, BoardPosition> rotationMap = ChaosMath.RotateLayerPositions(layerPositions, axis, layer, clockwise);
-        
+
+        // Calculate rotation mapping with board dimensions for multi-board support
+        Dictionary<BoardPosition, BoardPosition> rotationMap = ChaosMath.RotateLayerPositions(layerPositions, axis, layer, clockwise, boardDimensions);
+
         // Apply the rotation
         yield return StartCoroutine(ApplyChaosRotation(rotationMap, animationDuration));
     }

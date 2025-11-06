@@ -265,6 +265,12 @@ public class MinimaxEngine
             ? BoardDimensionsManager.Instance.GetDimensions()
             : new Vector3Int(4, 4, 4); // Fallback to 4x4x4 for 2-player games
 
+        // DIAGNOSTIC: Log board scanning details for debugging
+        Debug.Log($"🔍 MinimaxEngine.GetAllPossibleMoves: Scanning board for {player} pieces");
+        Debug.Log($"🔍 Board dimensions: {boardDimensions.x}x{boardDimensions.y}x{boardDimensions.z}");
+
+        int piecesFound = 0;
+
         // Scan all board positions for pieces of the given color
         for (int x = 0; x < boardDimensions.x; x++)
         {
@@ -277,9 +283,17 @@ public class MinimaxEngine
 
                     if (piece != null && piece.pieceColor == player)
                     {
+                        piecesFound++;
+
                         // PERFORMANCE: Use GetValidMoves instead of GetLegalMoves to skip expensive check validation
                         // Check validation will be done once at the top level, not for every minimax node
                         List<BoardPosition> validMoves = piece.GetValidMoves();
+
+                        // DIAGNOSTIC: Log details for Black pieces to help debug why they don't move
+                        if (player == PieceColor.Black)
+                        {
+                            Debug.Log($"🔍 Found {player} {piece.pieceType} at {position}, piece.CurrentPosition={piece.CurrentPosition}, validMoves count={validMoves.Count}");
+                        }
 
                         foreach (BoardPosition movePos in validMoves)
                         {
@@ -300,6 +314,9 @@ public class MinimaxEngine
                 }
             }
         }
+
+        // DIAGNOSTIC: Summary logging
+        Debug.Log($"🔍 MinimaxEngine.GetAllPossibleMoves: Found {piecesFound} {player} pieces, generated {moves.Count} total moves");
 
         // Update cache
         movesCache[player] = new List<AIMove>(moves);

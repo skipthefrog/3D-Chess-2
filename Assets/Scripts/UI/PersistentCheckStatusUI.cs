@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
+using System.Collections.Generic;
 
 /// <summary>
 /// Enhanced status bar UI component that displays comprehensive game status
@@ -39,15 +40,17 @@ public class PersistentCheckStatusUI : MonoBehaviour
     private UnityEngine.UI.Image newGameButtonImage;
     private TMPro.TextMeshProUGUI newGameButtonText;
     
-    // Status tracking
-    private bool whiteInCheck = false;
-    private bool blackInCheck = false;
-    private bool lastWhiteStatus = false;
-    private bool lastBlackStatus = false;
-    
+    // Status tracking - MULTI-PLAYER SUPPORT: Track check status for all active players
+    private Dictionary<PieceColor, bool> playerCheckStatus = new Dictionary<PieceColor, bool>();
+    private Dictionary<PieceColor, bool> lastPlayerCheckStatus = new Dictionary<PieceColor, bool>();
+
     // Turn tracking
     private PieceColor currentTurn = PieceColor.White;
     private GameState currentGameState = GameState.PiecePlacement;
+
+    // Last move tracking for chess notation display
+    private string lastMoveNotation = "";
+    private bool hasLastMove = false;
     
     // Game end tracking
     private bool gameEnded = false;
@@ -61,7 +64,11 @@ public class PersistentCheckStatusUI : MonoBehaviour
     
     // Update coroutine
     private Coroutine statusUpdateCoroutine;
-    
+
+    // Animation state management for delayed status updates
+    private bool isWaitingForAnimationBeforeStatusUpdate = false;
+    private (PieceColor previousPlayer, PieceColor newCurrentPlayer)? pendingTurnUpdate = null;
+
     public static PersistentCheckStatusUI Instance { get; private set; }
     
     private void Awake()
@@ -101,39 +108,48 @@ public class PersistentCheckStatusUI : MonoBehaviour
         {
             StopCoroutine(statusUpdateCoroutine);
         }
-        
+
+        // Clean up animation waiting state
+        if (isWaitingForAnimationBeforeStatusUpdate)
+        {
+            CleanupAnimationWaiting();
+        }
+
         // Clean up event subscriptions
         if (enableEventDrivenUpdates && CheckDetectionManager.Instance != null)
         {
             CheckDetectionManager.Instance.OnKingInCheck -= OnKingInCheckEvent;
             CheckDetectionManager.Instance.OnCheckResolved -= OnCheckResolvedEvent;
         }
-        
+
         // Clean up game end event subscriptions
         if (GameEndDetectionManager.Instance != null)
         {
             GameEndDetectionManager.Instance.OnCheckmate -= OnCheckmateEvent;
+            GameEndDetectionManager.Instance.OnConquest -= OnConquestEvent;
+            GameEndDetectionManager.Instance.OnGameEnd -= OnGameEndEvent;
             GameEndDetectionManager.Instance.OnStalemate -= OnStalemateEvent;
             GameEndDetectionManager.Instance.OnDrawAccepted -= OnDrawAcceptedEvent;
             GameEndDetectionManager.Instance.OnForfeit -= OnForfeitEvent;
         }
-        
+
         // Clean up turn manager event subscriptions
         if (TurnManager.Instance != null)
         {
             TurnManager.Instance.OnTurnChanged -= OnTurnChangedEvent;
         }
-        
+
         // Clean up game state manager event subscriptions
         if (GameStateManager.Instance != null)
         {
             GameStateManager.Instance.OnStateChanged -= OnGameStateChangedEvent;
         }
-        
+
         // Clean up chaos mode event subscriptions
         if (ChaosRotationManager.Instance != null)
         {
             ChaosRotationManager.Instance.OnChaosEvent -= OnChaosEvent;
+            ChaosRotationManager.Instance.OnChaosRotationCompleted -= OnChaosRotationCompleted;
         }
     }
     
@@ -369,10 +385,12 @@ public class PersistentCheckStatusUI : MonoBehaviour
                     if (GameEndDetectionManager.Instance != null)
                     {
                         GameEndDetectionManager.Instance.OnCheckmate += OnCheckmateEvent;
+                        GameEndDetectionManager.Instance.OnConquest += OnConquestEvent;
+                        GameEndDetectionManager.Instance.OnGameEnd += OnGameEndEvent;
                         GameEndDetectionManager.Instance.OnStalemate += OnStalemateEvent;
                         GameEndDetectionManager.Instance.OnDrawAccepted += OnDrawAcceptedEvent;
                         GameEndDetectionManager.Instance.OnForfeit += OnForfeitEvent;
-                        Debug.Log("PersistentCheckStatusUI: Successfully subscribed to game end and draw/forfeit events");
+                        Debug.Log("PersistentCheckStatusUI: Successfully subscribed to game end, conquest, and draw/forfeit events");
                     }
                     
                     // Subscribe to turn manager events for current player tracking
@@ -395,6 +413,7 @@ public class PersistentCheckStatusUI : MonoBehaviour
                     if (ChaosRotationManager.Instance != null)
                     {
                         ChaosRotationManager.Instance.OnChaosEvent += OnChaosEvent;
+                        ChaosRotationManager.Instance.OnChaosRotationCompleted += OnChaosRotationCompleted;
                         Debug.Log("PersistentCheckStatusUI: Successfully subscribed to chaos events");
                     }
                     
@@ -420,118 +439,254 @@ public class PersistentCheckStatusUI : MonoBehaviour
     
     /// <summary>
     /// Set initial status display
+    /// MULTI-PLAYER SUPPORT: Initialize dictionary from active players
     /// </summary>
     private void UpdateInitialStatus()
     {
         Debug.Log("PersistentCheckStatusUI: Setting initial status display");
-        
-        if (CheckDetectionManager.Instance != null && 
-            GameStateManager.Instance != null && 
-            GameStateManager.Instance.CanMovePieces())
+
+        // Get all active players
+        List<PieceColor> activePlayers = new List<PieceColor>();
+        if (PlayerManager.Instance != null)
         {
-            // Check actual status during gameplay
-            bool currentWhiteStatus = CheckDetectionManager.Instance.IsKingInCheck(PieceColor.White);
-            bool currentBlackStatus = CheckDetectionManager.Instance.IsKingInCheck(PieceColor.Black);
-            
-            whiteInCheck = currentWhiteStatus;
-            blackInCheck = currentBlackStatus;
-            
-            UpdateStatusDisplay();
-            Debug.Log($"PersistentCheckStatusUI: Initial status set - White: {(whiteInCheck ? "CHECK" : "Safe")}, Black: {(blackInCheck ? "CHECK" : "Safe")}");
+            activePlayers = PlayerManager.Instance.GetActivePlayers();
         }
         else
         {
-            // During placement phase or when manager not ready, show safe
-            whiteInCheck = false;
-            blackInCheck = false;
+            // Fallback to 2-player mode
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+        }
+
+        if (CheckDetectionManager.Instance != null &&
+            GameStateManager.Instance != null &&
+            GameStateManager.Instance.CanMovePieces())
+        {
+            // Check actual status during gameplay for all active players
+            foreach (PieceColor player in activePlayers)
+            {
+                bool currentStatus = CheckDetectionManager.Instance.IsKingInCheck(player);
+                playerCheckStatus[player] = currentStatus;
+            }
+
             UpdateStatusDisplay();
-            Debug.Log("PersistentCheckStatusUI: Initial status set to Safe for both players");
+
+            // Log status for all players
+            string statusLog = "PersistentCheckStatusUI: Initial status set - ";
+            foreach (var kvp in playerCheckStatus)
+            {
+                statusLog += $"{kvp.Key}: {(kvp.Value ? "CHECK" : "Safe")} | ";
+            }
+            Debug.Log(statusLog.TrimEnd(' ', '|'));
+        }
+        else
+        {
+            // During placement phase or when manager not ready, show safe for all players
+            foreach (PieceColor player in activePlayers)
+            {
+                playerCheckStatus[player] = false;
+            }
+
+            UpdateStatusDisplay();
+            Debug.Log($"PersistentCheckStatusUI: Initial status set to Safe for all {activePlayers.Count} players");
         }
     }
     
     /// <summary>
     /// Force synchronization with actual check detection state
+    /// MULTI-PLAYER SUPPORT: Synchronize all active players
     /// </summary>
     private void SynchronizeWithCheckDetection()
     {
-        if (CheckDetectionManager.Instance == null || 
-            GameStateManager.Instance == null || 
+        if (CheckDetectionManager.Instance == null ||
+            GameStateManager.Instance == null ||
             !GameStateManager.Instance.CanMovePieces())
         {
             return;
         }
-        
-        // Get current actual check states
-        bool actualWhiteInCheck = CheckDetectionManager.Instance.IsKingInCheck(PieceColor.White);
-        bool actualBlackInCheck = CheckDetectionManager.Instance.IsKingInCheck(PieceColor.Black);
-        
-        // Update UI state to match actual detection
-        if (whiteInCheck != actualWhiteInCheck || blackInCheck != actualBlackInCheck)
+
+        // Get all active players
+        List<PieceColor> activePlayers = new List<PieceColor>();
+        if (PlayerManager.Instance != null)
         {
-            Debug.Log($"PersistentCheckStatusUI: Synchronizing state - UI had W:{whiteInCheck}/B:{blackInCheck}, Detection has W:{actualWhiteInCheck}/B:{actualBlackInCheck}");
-            
-            whiteInCheck = actualWhiteInCheck;
-            blackInCheck = actualBlackInCheck;
+            activePlayers = PlayerManager.Instance.GetActivePlayers();
+        }
+        else
+        {
+            // Fallback to 2-player mode
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+        }
+
+        // Check for discrepancies
+        bool needsUpdate = false;
+        Dictionary<PieceColor, bool> actualCheckStates = new Dictionary<PieceColor, bool>();
+
+        foreach (PieceColor player in activePlayers)
+        {
+            bool actualInCheck = CheckDetectionManager.Instance.IsKingInCheck(player);
+            actualCheckStates[player] = actualInCheck;
+
+            if (!playerCheckStatus.ContainsKey(player) || playerCheckStatus[player] != actualInCheck)
+            {
+                needsUpdate = true;
+            }
+        }
+
+        // Update UI state to match actual detection
+        if (needsUpdate)
+        {
+            string beforeLog = "PersistentCheckStatusUI: Synchronizing state - UI had ";
+            foreach (var kvp in playerCheckStatus)
+            {
+                beforeLog += $"{kvp.Key}:{kvp.Value} ";
+            }
+
+            string afterLog = "Detection has ";
+            foreach (var kvp in actualCheckStates)
+            {
+                afterLog += $"{kvp.Key}:{kvp.Value} ";
+            }
+
+            Debug.Log(beforeLog + "| " + afterLog);
+
+            // Update to actual states
+            playerCheckStatus = new Dictionary<PieceColor, bool>(actualCheckStates);
             UpdateStatusDisplay();
-            
-            Debug.Log($"PersistentCheckStatusUI: Synchronized - White: {(whiteInCheck ? "CHECK" : "Safe")}, Black: {(blackInCheck ? "CHECK" : "Safe")}");
+
+            // Log final status
+            string statusLog = "PersistentCheckStatusUI: Synchronized - ";
+            foreach (var kvp in playerCheckStatus)
+            {
+                statusLog += $"{kvp.Key}: {(kvp.Value ? "CHECK" : "Safe")} | ";
+            }
+            Debug.Log(statusLog.TrimEnd(' ', '|'));
         }
     }
     
     /// <summary>
     /// Event handler for when a king is in check
+    /// MULTI-PLAYER SUPPORT: Now supports all player colors dynamically
     /// </summary>
     private void OnKingInCheckEvent(PieceColor kingColor)
     {
         Debug.Log($"🚨 PersistentCheckStatusUI.OnKingInCheckEvent: {kingColor} king is in check!");
-        
-        if (kingColor == PieceColor.White)
+
+        // Update check status for this specific player
+        playerCheckStatus[kingColor] = true;
+
+        // Only update display if in Playing state - prevents interference during state transitions
+        if (currentGameState == GameState.Playing)
         {
-            whiteInCheck = true;
+            UpdateStatusDisplay();
         }
         else
         {
-            blackInCheck = true;
+            Debug.Log($"PersistentCheckStatusUI: Skipping display update - not in Playing state (current: {currentGameState})");
         }
-        
-        UpdateStatusDisplay();
-        Debug.Log($"PersistentCheckStatusUI: Event-driven update completed - White: {(whiteInCheck ? "CHECK" : "Safe")}, Black: {(blackInCheck ? "CHECK" : "Safe")}");
+
+        // Log status for all players
+        string statusLog = "PersistentCheckStatusUI: Event-driven update completed - ";
+        foreach (var kvp in playerCheckStatus)
+        {
+            statusLog += $"{kvp.Key}: {(kvp.Value ? "CHECK" : "Safe")} | ";
+        }
+        Debug.Log(statusLog.TrimEnd(' ', '|'));
     }
     
     /// <summary>
     /// Event handler for when check is resolved
+    /// MULTI-PLAYER SUPPORT: Now supports all player colors dynamically
     /// </summary>
     private void OnCheckResolvedEvent(PieceColor kingColor)
     {
         Debug.Log($"✅ PersistentCheckStatusUI.OnCheckResolvedEvent: {kingColor} check resolved!");
-        
-        if (kingColor == PieceColor.White)
+
+        // Update check status for this specific player
+        playerCheckStatus[kingColor] = false;
+
+        // Only update display if in Playing state - prevents interference during state transitions
+        if (currentGameState == GameState.Playing)
         {
-            whiteInCheck = false;
+            UpdateStatusDisplay();
         }
         else
         {
-            blackInCheck = false;
+            Debug.Log($"PersistentCheckStatusUI: Skipping display update - not in Playing state (current: {currentGameState})");
         }
-        
-        UpdateStatusDisplay();
-        Debug.Log($"PersistentCheckStatusUI: Event-driven update completed - White: {(whiteInCheck ? "CHECK" : "Safe")}, Black: {(blackInCheck ? "CHECK" : "Safe")}");
+
+        // Log status for all players
+        string statusLog = "PersistentCheckStatusUI: Event-driven update completed - ";
+        foreach (var kvp in playerCheckStatus)
+        {
+            statusLog += $"{kvp.Key}: {(kvp.Value ? "CHECK" : "Safe")} | ";
+        }
+        Debug.Log(statusLog.TrimEnd(' ', '|'));
     }
     
     /// <summary>
-    /// Event handler for checkmate
+    /// Event handler for checkmate - now only logs, actual game end handled by OnGameEnd
     /// </summary>
     private void OnCheckmateEvent(PieceColor checkmatedPlayer)
     {
-        PieceColor winner = (checkmatedPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+        // Don't set gameEnded here - let OnGameEnd handle it for final checkmate
+        // For conquest scenarios, OnConquest will handle the UI update
+        Debug.Log($"🏁 PersistentCheckStatusUI.OnCheckmateEvent: Checkmate detected for {checkmatedPlayer}");
+    }
+
+    /// <summary>
+    /// Event handler for conquest - shows temporary message when player conquered in multiplayer
+    /// </summary>
+    private void OnConquestEvent(PieceColor conqueror, PieceColor defeated, int piecesTransferred)
+    {
+        int remainingPlayers = PlayerManager.Instance != null ? PlayerManager.Instance.GetActivePlayerCount() : 0;
+
+        string conquestMessage = $"⚔️ CONQUEST! {conqueror.ToString().ToUpper()} CAPTURED {defeated.ToString().ToUpper()}'S PIECES! {remainingPlayers} PLAYERS REMAIN";
+
+        Debug.Log($"🎨 PersistentCheckStatusUI.OnConquestEvent: {conquestMessage}");
+
+        // Show conquest message temporarily (3 seconds), then return to normal status
+        StartCoroutine(ShowTemporaryConquestMessage(conquestMessage));
+    }
+
+    /// <summary>
+    /// Coroutine to show conquest message temporarily then return to normal status
+    /// </summary>
+    private System.Collections.IEnumerator ShowTemporaryConquestMessage(string message)
+    {
+        // Save current status to restore later
+        bool wasGameEnded = gameEnded;
+        string previousMessage = gameEndMessage;
+
+        // Temporarily show conquest message
+        gameEnded = true; // Temporarily set to show message instead of turn status
+        gameEndMessage = message;
+        UpdateStatusDisplay();
+
+        // Wait 3 seconds
+        yield return new UnityEngine.WaitForSeconds(3f);
+
+        // Restore normal status
+        gameEnded = wasGameEnded; // Should be false for conquest
+        gameEndMessage = previousMessage;
+        UpdateStatusDisplay(); // Will show normal turn/check status again
+
+        Debug.Log("🎨 PersistentCheckStatusUI: Conquest message cleared, returning to normal status");
+    }
+
+    /// <summary>
+    /// Event handler for game end - sets final game over state
+    /// </summary>
+    private void OnGameEndEvent(string reason)
+    {
         gameEnded = true;
-        gameEndMessage = $"CHECKMATE! {winner.ToString().ToUpper()} WINS!";
-        
-        Debug.Log($"🏁 PersistentCheckStatusUI.OnCheckmateEvent: {gameEndMessage}");
+        gameEndMessage = reason.ToUpper();
+
+        Debug.Log($"🏁 PersistentCheckStatusUI.OnGameEndEvent: {gameEndMessage}");
         UpdateStatusDisplay();
         ShowNewGameButton();
     }
-    
+
     /// <summary>
     /// Event handler for stalemate
     /// </summary>
@@ -574,13 +729,31 @@ public class PersistentCheckStatusUI : MonoBehaviour
     
     /// <summary>
     /// Event handler for turn changes
+    /// Delays status update until piece animations complete for smooth visual transitions
     /// </summary>
-    private void OnTurnChangedEvent(PieceColor newCurrentPlayer)
+    private void OnTurnChangedEvent(PieceColor previousPlayer, PieceColor newCurrentPlayer)
     {
-        Debug.Log($"🔄 PersistentCheckStatusUI.OnTurnChangedEvent: Turn changed to {newCurrentPlayer}");
-        
-        currentTurn = newCurrentPlayer;
-        UpdateStatusDisplay();
+        Debug.Log($"🔄 PersistentCheckStatusUI.OnTurnChangedEvent: Turn changed from {previousPlayer} to {newCurrentPlayer}");
+
+        // Check if any pieces are still animating from the previous turn
+        bool piecesAnimating = AnyPiecesStillAnimating();
+        Debug.Log($"🔄 PersistentCheckStatusUI: AnyPiecesStillAnimating() = {piecesAnimating}");
+
+        if (piecesAnimating)
+        {
+            // Pieces still animating - defer status update until animations complete
+            Debug.Log($"🎬 PersistentCheckStatusUI: Pieces still animating, deferring status update for turn change to {newCurrentPlayer}");
+            isWaitingForAnimationBeforeStatusUpdate = true;
+            pendingTurnUpdate = (previousPlayer, newCurrentPlayer);
+            SubscribeToAnimationCompletion();
+        }
+        else
+        {
+            // No animations - update status immediately
+            Debug.Log($"🔄 PersistentCheckStatusUI: No animations active, updating status immediately");
+            currentTurn = newCurrentPlayer;
+            UpdateStatusDisplay();
+        }
     }
     
     /// <summary>
@@ -589,9 +762,9 @@ public class PersistentCheckStatusUI : MonoBehaviour
     private void OnGameStateChangedEvent(GameState newState)
     {
         Debug.Log($"🎮 PersistentCheckStatusUI.OnGameStateChangedEvent: Game state changed to {newState}");
-        
+
         currentGameState = newState;
-        
+
         // Reset game end status when transitioning to new game
         if (newState == GameState.PiecePlacement || newState == GameState.Playing)
         {
@@ -599,7 +772,19 @@ public class PersistentCheckStatusUI : MonoBehaviour
             gameEndMessage = "";
             HideNewGameButton();
         }
-        
+
+        // TURN SYNC: Force sync with TurnManager when entering Playing state
+        // This ensures turn indicator shows correct player even if events fired out of order
+        if (newState == GameState.Playing && TurnManager.Instance != null)
+        {
+            PieceColor actualCurrentPlayer = TurnManager.Instance.GetCurrentPlayer();
+            if (currentTurn != actualCurrentPlayer)
+            {
+                Debug.Log($"🔄 PersistentCheckStatusUI: Syncing turn on state transition - was {currentTurn}, now {actualCurrentPlayer}");
+                currentTurn = actualCurrentPlayer;
+            }
+        }
+
         UpdateStatusDisplay();
     }
     
@@ -609,14 +794,28 @@ public class PersistentCheckStatusUI : MonoBehaviour
     private void OnChaosEvent(string message)
     {
         Debug.Log($"🌪️ PersistentCheckStatusUI.OnChaosEvent: {message}");
-        
+
         chaosEventActive = true;
         chaosMessage = message;
         chaosMessageTimestamp = Time.time;
-        
+
         UpdateStatusDisplay();
     }
-    
+
+    /// <summary>
+    /// Event handler for chaos rotation completion
+    /// Clears the chaos message when animation finishes
+    /// </summary>
+    private void OnChaosRotationCompleted(ChaosRotationType rotationType)
+    {
+        Debug.Log($"🌪️ PersistentCheckStatusUI.OnChaosRotationCompleted: Clearing chaos message after {rotationType} completion");
+
+        chaosEventActive = false;
+        chaosMessage = "";
+
+        UpdateStatusDisplay();
+    }
+
     /// <summary>
     /// Stop status monitoring
     /// </summary>
@@ -633,49 +832,89 @@ public class PersistentCheckStatusUI : MonoBehaviour
     
     /// <summary>
     /// Continuous status monitoring coroutine
+    /// MULTI-PLAYER SUPPORT: Track all active players dynamically
     /// </summary>
     private System.Collections.IEnumerator ContinuousStatusUpdate()
     {
         while (enablePersistentStatus)
         {
+            // Get all active players
+            List<PieceColor> activePlayers = new List<PieceColor>();
+            if (PlayerManager.Instance != null)
+            {
+                activePlayers = PlayerManager.Instance.GetActivePlayers();
+            }
+            else
+            {
+                // Fallback to 2-player mode
+                activePlayers.Add(PieceColor.White);
+                activePlayers.Add(PieceColor.Black);
+            }
+
             // Wait for CheckDetectionManager to be available
-            if (CheckDetectionManager.Instance != null && 
-                GameStateManager.Instance != null && 
+            if (CheckDetectionManager.Instance != null &&
+                GameStateManager.Instance != null &&
                 GameStateManager.Instance.CanMovePieces())
             {
-                // Get current check status for both players
-                bool currentWhiteStatus = CheckDetectionManager.Instance.IsKingInCheck(PieceColor.White);
-                bool currentBlackStatus = CheckDetectionManager.Instance.IsKingInCheck(PieceColor.Black);
-                
-                // Update status if changed
-                if (currentWhiteStatus != lastWhiteStatus || currentBlackStatus != lastBlackStatus)
+                // Get current check status for all active players
+                bool statusChanged = false;
+                Dictionary<PieceColor, bool> currentStatuses = new Dictionary<PieceColor, bool>();
+
+                foreach (PieceColor player in activePlayers)
                 {
-                    whiteInCheck = currentWhiteStatus;
-                    blackInCheck = currentBlackStatus;
-                    
+                    bool currentStatus = CheckDetectionManager.Instance.IsKingInCheck(player);
+                    currentStatuses[player] = currentStatus;
+
+                    // Check if this player's status changed
+                    if (!lastPlayerCheckStatus.ContainsKey(player) || lastPlayerCheckStatus[player] != currentStatus)
+                    {
+                        statusChanged = true;
+                    }
+                }
+
+                // Update status if changed
+                if (statusChanged)
+                {
+                    playerCheckStatus = new Dictionary<PieceColor, bool>(currentStatuses);
                     UpdateStatusDisplay();
-                    
-                    lastWhiteStatus = currentWhiteStatus;
-                    lastBlackStatus = currentBlackStatus;
-                    
-                    Debug.Log($"PersistentCheckStatusUI: Status updated - White: {(whiteInCheck ? "CHECK" : "Safe")}, Black: {(blackInCheck ? "CHECK" : "Safe")}");
+                    lastPlayerCheckStatus = new Dictionary<PieceColor, bool>(currentStatuses);
+
+                    // Log status for all players
+                    string statusLog = "PersistentCheckStatusUI: Status updated - ";
+                    foreach (var kvp in playerCheckStatus)
+                    {
+                        statusLog += $"{kvp.Key}: {(kvp.Value ? "CHECK" : "Safe")} | ";
+                    }
+                    Debug.Log(statusLog.TrimEnd(' ', '|'));
                 }
             }
             else if (GameStateManager.Instance != null && GameStateManager.Instance.CanPlacePieces())
             {
-                // During placement phase, show "Safe" for both players
-                if (whiteInCheck || blackInCheck)
+                // During placement phase, show "Safe" for all players
+                bool anyPlayerInCheck = false;
+                foreach (var kvp in playerCheckStatus)
                 {
-                    whiteInCheck = false;
-                    blackInCheck = false;
+                    if (kvp.Value)
+                    {
+                        anyPlayerInCheck = true;
+                        break;
+                    }
+                }
+
+                if (anyPlayerInCheck)
+                {
+                    foreach (PieceColor player in activePlayers)
+                    {
+                        playerCheckStatus[player] = false;
+                    }
                     UpdateStatusDisplay();
-                    Debug.Log("PersistentCheckStatusUI: Placement phase - both players safe");
+                    Debug.Log($"PersistentCheckStatusUI: Placement phase - all {activePlayers.Count} players safe");
                 }
             }
-            
+
             yield return new WaitForSeconds(1.0f); // Fallback polling interval
         }
-        
+
         Debug.Log("PersistentCheckStatusUI: Status monitoring stopped");
     }
     
@@ -685,16 +924,13 @@ public class PersistentCheckStatusUI : MonoBehaviour
     private void UpdateStatusDisplay()
     {
         if (statusText == null) return;
-        
+
         string statusMessage;
-        
-        // Check if chaos message should timeout
-        if (chaosEventActive && Time.time - chaosMessageTimestamp > chaosMessageDuration)
-        {
-            chaosEventActive = false;
-            chaosMessage = "";
-        }
-        
+
+        // CHAOS MODE FIX: Removed timeout check - chaos message now clears via OnChaosRotationCompleted event
+        // This ensures the message displays for the full animation duration (2-6+ seconds)
+        // The old 3-second timeout was too short and caused the message to flicker
+
         // Show chaos message if active (highest priority)
         if (chaosEventActive)
         {
@@ -729,37 +965,145 @@ public class PersistentCheckStatusUI : MonoBehaviour
         }
         else
         {
-            // Enhanced status bar format with icons and turn indicator
-            string whiteIcon = whiteInCheck ? checkIcon : safeIcon;
-            string blackIcon = blackInCheck ? checkIcon : safeIcon;
-            string whiteStatus = whiteInCheck ? "CHECK!" : "Safe";
-            string blackStatus = blackInCheck ? "CHECK!" : "Safe";
-            
+            // MULTI-PLAYER SUPPORT: Dynamic status format based on player count
+            // Get all active players
+            List<PieceColor> activePlayers = new List<PieceColor>();
+            if (PlayerManager.Instance != null)
+            {
+                activePlayers = PlayerManager.Instance.GetActivePlayers();
+            }
+            else
+            {
+                // Fallback to 2-player mode
+                activePlayers.Add(PieceColor.White);
+                activePlayers.Add(PieceColor.Black);
+            }
+
+            // Ensure all active players are in the status dictionary
+            foreach (PieceColor player in activePlayers)
+            {
+                if (!playerCheckStatus.ContainsKey(player))
+                {
+                    playerCheckStatus[player] = false; // Default to safe
+                }
+            }
+
+            int playerCount = activePlayers.Count;
+
             // Add turn indicator highlighting
             string turnIndicator = "";
             if (currentGameState == GameState.Playing)
             {
+                // DEFENSIVE SYNC: Verify currentTurn matches TurnManager to prevent display desync
+                if (TurnManager.Instance != null)
+                {
+                    PieceColor actualCurrentPlayer = TurnManager.Instance.GetCurrentPlayer();
+                    if (currentTurn != actualCurrentPlayer)
+                    {
+                        Debug.LogWarning($"⚠️ PersistentCheckStatusUI: Turn indicator out of sync! UI shows {currentTurn}, TurnManager shows {actualCurrentPlayer}. Syncing...");
+                        currentTurn = actualCurrentPlayer;
+                    }
+                }
+
                 turnIndicator = $"Turn: {currentTurn} {turnIcon}";
             }
             else if (currentGameState == GameState.PiecePlacement)
             {
-                turnIndicator = "Placement Phase";
+                turnIndicator = ""; // Empty - "place pieces" buttons already indicate placement phase
             }
             else
             {
                 turnIndicator = $"State: {currentGameState}";
             }
-            
-            // Build enhanced status message
-            statusMessage = $"{whiteIcon} White: {whiteStatus} | {turnIndicator} | Black: {blackStatus} {blackIcon}";
+
+            // Build status message using chess notation
+            // Format: "Turn: WHITE ▶ | Last: WQ B3c→B3d | Check: BK@A1a ⚠️ ← WQ@B3d"
+
+            List<string> statusParts = new List<string>();
+
+            // Part 1: Turn indicator
+            statusParts.Add(turnIndicator);
+
+            // Part 2: Last move (if available)
+            if (hasLastMove && !string.IsNullOrEmpty(lastMoveNotation))
+            {
+                statusParts.Add($"Last: {lastMoveNotation}");
+            }
+
+            // Part 3: Check status with attacker positions
+            List<string> checkMessages = new List<string>();
+            foreach (PieceColor player in activePlayers)
+            {
+                if (playerCheckStatus[player])
+                {
+                    // Get the king that's in check
+                    ChessPiece threatenedKing = GetKingForPlayer(player);
+
+                    if (threatenedKing != null && CheckDetectionManager.Instance != null)
+                    {
+                        // Get all attackers threatening this king
+                        CheckThreatInfo threatInfo = CheckDetectionManager.Instance.GetCheckThreats(player);
+
+                        if (threatInfo != null && threatInfo.HasThreats)
+                        {
+                            if (threatInfo.attackingPieces.Count == 1)
+                            {
+                                // Single attacker format
+                                string checkNotation = ChessNotationConverter.FormatCheckStatus(threatenedKing, threatInfo.attackingPieces[0]);
+                                checkMessages.Add(checkNotation);
+                            }
+                            else
+                            {
+                                // Multiple attackers format (double check)
+                                string checkNotation = ChessNotationConverter.FormatCheckStatusMultipleAttackers(threatenedKing, threatInfo.attackingPieces);
+                                checkMessages.Add(checkNotation);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Add check messages to status
+            if (checkMessages.Count > 0)
+            {
+                statusParts.Add($"Check: {string.Join(" | ", checkMessages)}");
+            }
+
+            // Combine all parts
+            statusMessage = string.Join(" | ", statusParts);
+
+            // Adjust font size based on player count for better fit
+            if (playerCount == 2)
+            {
+                statusText.fontSize = 18; // Full size for 2 players
+            }
+            else if (playerCount == 4)
+            {
+                statusText.fontSize = 16; // Slightly smaller for 4 players
+            }
+            else // 6-player mode
+            {
+                statusText.fontSize = 14; // Smallest for 6 players
+            }
+
             statusText.text = statusMessage;
-            
+
             // Update background color based on game state and check status
-            if (whiteInCheck || blackInCheck)
+            bool anyPlayerInCheck = false;
+            foreach (var kvp in playerCheckStatus)
+            {
+                if (kvp.Value)
+                {
+                    anyPlayerInCheck = true;
+                    break;
+                }
+            }
+
+            if (anyPlayerInCheck)
             {
                 // Red background if anyone is in check
                 backgroundImage.color = new Color(0.8f, 0.2f, 0.2f, 0.85f);
-                
+
                 // Add pulsing effect for check status
                 StartCoroutine(PulseEffect());
             }
@@ -780,32 +1124,55 @@ public class PersistentCheckStatusUI : MonoBehaviour
     
     /// <summary>
     /// Pulse effect for check status
+    /// MULTI-PLAYER SUPPORT: Check any player in check
     /// </summary>
     private System.Collections.IEnumerator PulseEffect()
     {
-        if (!whiteInCheck && !blackInCheck && !gameEnded) yield break;
-        
+        // Check if any player is in check
+        bool anyPlayerInCheck = false;
+        foreach (var kvp in playerCheckStatus)
+        {
+            if (kvp.Value)
+            {
+                anyPlayerInCheck = true;
+                break;
+            }
+        }
+
+        if (!anyPlayerInCheck && !gameEnded) yield break;
+
         float pulseSpeed = 2f;
         float elapsed = 0f;
-        
-        while ((whiteInCheck || blackInCheck || gameEnded) && elapsed < 2f) // Pulse for 2 seconds max
+
+        while ((anyPlayerInCheck || gameEnded) && elapsed < 2f) // Pulse for 2 seconds max
         {
+            // Re-check in case status changed during animation
+            anyPlayerInCheck = false;
+            foreach (var kvp in playerCheckStatus)
+            {
+                if (kvp.Value)
+                {
+                    anyPlayerInCheck = true;
+                    break;
+                }
+            }
+
             float pulse = (Mathf.Sin(elapsed * pulseSpeed) + 1f) * 0.5f;
             float alpha = Mathf.Lerp(0.6f, 0.9f, pulse);
-            
+
             if (backgroundImage != null)
             {
                 Color currentColor = backgroundImage.color;
                 currentColor.a = alpha;
                 backgroundImage.color = currentColor;
             }
-            
+
             elapsed += Time.deltaTime;
             yield return null;
         }
-        
+
         // Reset to normal alpha
-        if (backgroundImage != null && (whiteInCheck || blackInCheck || gameEnded))
+        if (backgroundImage != null && (anyPlayerInCheck || gameEnded))
         {
             Color currentColor = backgroundImage.color;
             currentColor.a = 0.8f;
@@ -815,13 +1182,25 @@ public class PersistentCheckStatusUI : MonoBehaviour
     
     /// <summary>
     /// Manually set check status (for testing or external control)
+    /// MULTI-PLAYER SUPPORT: Set status for specific player
+    /// </summary>
+    public void SetCheckStatus(PieceColor player, bool inCheck)
+    {
+        Debug.Log($"PersistentCheckStatusUI.SetCheckStatus: {player}={inCheck}");
+
+        playerCheckStatus[player] = inCheck;
+        UpdateStatusDisplay();
+    }
+
+    /// <summary>
+    /// Legacy method for 2-player compatibility (for testing or external control)
     /// </summary>
     public void SetCheckStatus(bool whiteCheck, bool blackCheck)
     {
         Debug.Log($"PersistentCheckStatusUI.SetCheckStatus: White={whiteCheck}, Black={blackCheck}");
-        
-        whiteInCheck = whiteCheck;
-        blackInCheck = blackCheck;
+
+        playerCheckStatus[PieceColor.White] = whiteCheck;
+        playerCheckStatus[PieceColor.Black] = blackCheck;
         UpdateStatusDisplay();
     }
     
@@ -875,41 +1254,107 @@ public class PersistentCheckStatusUI : MonoBehaviour
     }
     
     /// <summary>
-    /// Get current check status
+    /// Get current check status for all players
+    /// MULTI-PLAYER SUPPORT: Returns dictionary of all player statuses
     /// </summary>
-    public (bool whiteInCheck, bool blackInCheck) GetCurrentStatus()
+    public Dictionary<PieceColor, bool> GetCurrentStatus()
     {
-        return (whiteInCheck, blackInCheck);
+        return new Dictionary<PieceColor, bool>(playerCheckStatus);
+    }
+
+    /// <summary>
+    /// Get current check status for specific player
+    /// </summary>
+    public bool GetPlayerCheckStatus(PieceColor player)
+    {
+        return playerCheckStatus.ContainsKey(player) ? playerCheckStatus[player] : false;
+    }
+
+    /// <summary>
+    /// Legacy method for 2-player compatibility
+    /// </summary>
+    public (bool whiteInCheck, bool blackInCheck) GetCurrentStatusLegacy()
+    {
+        bool white = playerCheckStatus.ContainsKey(PieceColor.White) ? playerCheckStatus[PieceColor.White] : false;
+        bool black = playerCheckStatus.ContainsKey(PieceColor.Black) ? playerCheckStatus[PieceColor.Black] : false;
+        return (white, black);
     }
     
     /// <summary>
     /// Force an immediate status update with direct synchronization
+    /// MULTI-PLAYER SUPPORT: Synchronize all active players
     /// </summary>
     public void ForceUpdate()
     {
-        if (CheckDetectionManager.Instance != null && 
-            GameStateManager.Instance != null && 
+        if (CheckDetectionManager.Instance != null &&
+            GameStateManager.Instance != null &&
             GameStateManager.Instance.CanMovePieces())
         {
-            bool currentWhiteStatus = CheckDetectionManager.Instance.IsKingInCheck(PieceColor.White);
-            bool currentBlackStatus = CheckDetectionManager.Instance.IsKingInCheck(PieceColor.Black);
-            
-            // Direct synchronization - bypass event system
-            bool stateChanged = (whiteInCheck != currentWhiteStatus) || (blackInCheck != currentBlackStatus);
-            
-            if (stateChanged)
+            // Get all active players
+            List<PieceColor> activePlayers = new List<PieceColor>();
+            if (PlayerManager.Instance != null)
             {
-                Debug.Log($"PersistentCheckStatusUI.ForceUpdate: Direct sync - UI had W:{whiteInCheck}/B:{blackInCheck}, Detection has W:{currentWhiteStatus}/B:{currentBlackStatus}");
-                
-                whiteInCheck = currentWhiteStatus;
-                blackInCheck = currentBlackStatus;
-                UpdateStatusDisplay();
-                
-                Debug.Log($"PersistentCheckStatusUI.ForceUpdate: Synchronized - White: {(whiteInCheck ? "CHECK" : "Safe")}, Black: {(blackInCheck ? "CHECK" : "Safe")}");
+                activePlayers = PlayerManager.Instance.GetActivePlayers();
             }
             else
             {
-                Debug.Log($"PersistentCheckStatusUI.ForceUpdate: No changes needed - White={whiteInCheck}, Black={blackInCheck}");
+                // Fallback to 2-player mode
+                activePlayers.Add(PieceColor.White);
+                activePlayers.Add(PieceColor.Black);
+            }
+
+            // Get current check status for all active players
+            Dictionary<PieceColor, bool> currentStatuses = new Dictionary<PieceColor, bool>();
+            bool stateChanged = false;
+
+            foreach (PieceColor player in activePlayers)
+            {
+                bool currentStatus = CheckDetectionManager.Instance.IsKingInCheck(player);
+                currentStatuses[player] = currentStatus;
+
+                // Check if this player's status changed
+                if (!playerCheckStatus.ContainsKey(player) || playerCheckStatus[player] != currentStatus)
+                {
+                    stateChanged = true;
+                }
+            }
+
+            // Direct synchronization - bypass event system
+            if (stateChanged)
+            {
+                string beforeLog = "PersistentCheckStatusUI.ForceUpdate: Direct sync - UI had ";
+                foreach (var kvp in playerCheckStatus)
+                {
+                    beforeLog += $"{kvp.Key}:{kvp.Value} ";
+                }
+
+                string afterLog = "Detection has ";
+                foreach (var kvp in currentStatuses)
+                {
+                    afterLog += $"{kvp.Key}:{kvp.Value} ";
+                }
+
+                Debug.Log(beforeLog + "| " + afterLog);
+
+                playerCheckStatus = new Dictionary<PieceColor, bool>(currentStatuses);
+                UpdateStatusDisplay();
+
+                // Log final status
+                string statusLog = "PersistentCheckStatusUI.ForceUpdate: Synchronized - ";
+                foreach (var kvp in playerCheckStatus)
+                {
+                    statusLog += $"{kvp.Key}: {(kvp.Value ? "CHECK" : "Safe")} | ";
+                }
+                Debug.Log(statusLog.TrimEnd(' ', '|'));
+            }
+            else
+            {
+                string statusLog = "PersistentCheckStatusUI.ForceUpdate: No changes needed - ";
+                foreach (var kvp in playerCheckStatus)
+                {
+                    statusLog += $"{kvp.Key}={kvp.Value} ";
+                }
+                Debug.Log(statusLog);
             }
         }
         else
@@ -919,13 +1364,77 @@ public class PersistentCheckStatusUI : MonoBehaviour
     }
     
     /// <summary>
+    /// Update the last move notation for display in status bar
+    /// Should be called whenever a move is made
+    /// </summary>
+    public void SetLastMove(ChessPiece piece, BoardPosition from, BoardPosition to, bool isCapture = false)
+    {
+        if (piece == null)
+        {
+            lastMoveNotation = "";
+            hasLastMove = false;
+            return;
+        }
+
+        lastMoveNotation = ChessNotationConverter.FormatMoveWithCapture(piece, from, to, isCapture);
+        hasLastMove = true;
+
+        Debug.Log($"PersistentCheckStatusUI: Last move set to {lastMoveNotation}");
+
+        // Update display immediately
+        UpdateStatusDisplay();
+    }
+
+    /// <summary>
+    /// Clear the last move notation
+    /// </summary>
+    public void ClearLastMove()
+    {
+        lastMoveNotation = "";
+        hasLastMove = false;
+        UpdateStatusDisplay();
+    }
+
+    /// <summary>
+    /// Get the king piece for a specific player
+    /// </summary>
+    private ChessPiece GetKingForPlayer(PieceColor player)
+    {
+        if (ChessBoard.Instance == null) return null;
+
+        // Get board dimensions
+        Vector3Int boardDims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
+        // Search for the king of the specified color
+        for (int x = 0; x < boardDims.x; x++)
+        {
+            for (int y = 0; y < boardDims.y; y++)
+            {
+                for (int z = 0; z < boardDims.z; z++)
+                {
+                    BoardPosition pos = new BoardPosition(x, y, z);
+                    ChessPiece piece = ChessBoard.Instance.GetPieceAt(pos);
+                    if (piece != null && piece.pieceType == ChessPieceType.King && piece.pieceColor == player)
+                    {
+                        return piece;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Test method for manual verification
     /// </summary>
     [ContextMenu("Test Check Status")]
     public void TestCheckStatus()
     {
         Debug.Log("PersistentCheckStatusUI: Testing check status display");
-        
+
         // Test sequence: Safe -> White Check -> Both Check -> Black Check -> Safe
         StartCoroutine(TestSequence());
     }
@@ -933,38 +1442,190 @@ public class PersistentCheckStatusUI : MonoBehaviour
     private System.Collections.IEnumerator TestSequence()
     {
         Debug.Log("PersistentCheckStatusUI: Starting enhanced status bar test sequence");
-        
+
+        // Get all active players
+        List<PieceColor> activePlayers = new List<PieceColor>();
+        if (PlayerManager.Instance != null)
+        {
+            activePlayers = PlayerManager.Instance.GetActivePlayers();
+        }
+        else
+        {
+            // Fallback to 2-player mode for testing
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+        }
+
+        // Initialize all players to safe
+        foreach (PieceColor player in activePlayers)
+        {
+            playerCheckStatus[player] = false;
+        }
+
         // Test normal gameplay with turn changes
         currentGameState = GameState.Playing;
-        
-        SetCheckStatus(false, false);
+
+        // All safe
         SetCurrentTurn(PieceColor.White);
+        UpdateStatusDisplay();
         yield return new WaitForSeconds(2f);
-        
-        SetCheckStatus(true, false);  // White in check
+
+        // First player in check
+        if (activePlayers.Count > 0)
+        {
+            SetCheckStatus(activePlayers[0], true);
+            yield return new WaitForSeconds(2f);
+        }
+
+        // Turn change
+        if (activePlayers.Count > 1)
+        {
+            SetCurrentTurn(activePlayers[1]);
+            yield return new WaitForSeconds(2f);
+
+            // Second player in check
+            SetCheckStatus(activePlayers[0], false);
+            SetCheckStatus(activePlayers[1], true);
+            yield return new WaitForSeconds(2f);
+        }
+
+        // Multiple players in check (if 4+ players)
+        if (activePlayers.Count >= 4)
+        {
+            SetCheckStatus(activePlayers[2], true);
+            SetCheckStatus(activePlayers[3], true);
+            yield return new WaitForSeconds(2f);
+        }
+
+        // All safe again
+        foreach (PieceColor player in activePlayers)
+        {
+            playerCheckStatus[player] = false;
+        }
+        UpdateStatusDisplay();
         yield return new WaitForSeconds(2f);
-        
-        SetCurrentTurn(PieceColor.Black);  // Turn change
-        yield return new WaitForSeconds(2f);
-        
-        SetCheckStatus(false, true);  // Black in check
-        yield return new WaitForSeconds(2f);
-        
-        SetCheckStatus(true, true);   // Both in check
-        yield return new WaitForSeconds(2f);
-        
-        SetCheckStatus(false, false); // Both safe
-        yield return new WaitForSeconds(2f);
-        
+
         // Test placement phase
         currentGameState = GameState.PiecePlacement;
         UpdateStatusDisplay();
         yield return new WaitForSeconds(2f);
-        
+
         // Back to normal
         currentGameState = GameState.Playing;
         UpdateStatusDisplay();
-        
+
         Debug.Log("PersistentCheckStatusUI: Enhanced test sequence complete");
+    }
+
+    // ===== ANIMATION MANAGEMENT FOR DELAYED STATUS UPDATES =====
+
+    /// <summary>
+    /// Check if any pieces on the board are still animating
+    /// </summary>
+    private bool AnyPiecesStillAnimating()
+    {
+        if (ChessBoard.Instance == null) return false;
+
+        // Get dynamic board dimensions
+        Vector3Int boardDimensions = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4);
+
+        // Check all positions on the board for animating pieces
+        for (int x = 0; x < boardDimensions.x; x++)
+        {
+            for (int y = 0; y < boardDimensions.y; y++)
+            {
+                for (int z = 0; z < boardDimensions.z; z++)
+                {
+                    BoardPosition position = new BoardPosition(x, y, z);
+                    ChessPiece piece = ChessBoard.Instance.GetPieceAt(position);
+
+                    if (piece != null && piece.IsMoving)
+                    {
+                        Debug.Log($"🎬 PersistentCheckStatusUI: Found animating piece - {piece.pieceColor} {piece.pieceType} at {position}");
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Subscribe to animation completion events to trigger delayed status updates
+    /// </summary>
+    private void SubscribeToAnimationCompletion()
+    {
+        ChessPiece.OnMoveAnimationComplete += OnAnimationCompletedForStatus;
+        Debug.Log($"🎬 PersistentCheckStatusUI: Subscribed to animation completion events for status update");
+    }
+
+    /// <summary>
+    /// Handle animation completion event for status updates
+    /// </summary>
+    private void OnAnimationCompletedForStatus(ChessPiece animatedPiece)
+    {
+        if (!isWaitingForAnimationBeforeStatusUpdate)
+        {
+            Debug.Log($"🎬 PersistentCheckStatusUI: Ignoring animation completion - not waiting for animations");
+            return;
+        }
+
+        Debug.Log($"🎬 PersistentCheckStatusUI: Animation completed for {animatedPiece.pieceColor} {animatedPiece.pieceType}");
+
+        // Start coroutine to wait one frame before checking animations (ensures all state updates complete)
+        StartCoroutine(CheckAndApplyPendingTurnUpdate());
+    }
+
+    /// <summary>
+    /// Coroutine that waits one frame then checks if animations are complete before applying turn update
+    /// </summary>
+    private System.Collections.IEnumerator CheckAndApplyPendingTurnUpdate()
+    {
+        // Wait one frame to ensure all piece movement state updates have completed
+        yield return null;
+
+        // Double-check that no pieces are still animating
+        if (!AnyPiecesStillAnimating())
+        {
+            Debug.Log($"🎬 PersistentCheckStatusUI: All animations complete (after safety frame), applying pending turn update");
+
+            if (pendingTurnUpdate.HasValue)
+            {
+                var (previousPlayer, newCurrentPlayer) = pendingTurnUpdate.Value;
+                Debug.Log($"🔄 PersistentCheckStatusUI: Applying delayed turn update from {previousPlayer} to {newCurrentPlayer}");
+
+                // Update the current turn
+                currentTurn = newCurrentPlayer;
+                UpdateStatusDisplay();
+
+                // Clean up
+                CleanupAnimationWaiting();
+            }
+            else
+            {
+                Debug.LogWarning($"⚠️ PersistentCheckStatusUI: No pending turn update found");
+                CleanupAnimationWaiting();
+            }
+        }
+        else
+        {
+            Debug.Log($"🎬 PersistentCheckStatusUI: Animation completed but other pieces still animating (after safety frame), continuing to wait");
+        }
+    }
+
+    /// <summary>
+    /// Clean up animation waiting state and unsubscribe from events
+    /// </summary>
+    private void CleanupAnimationWaiting()
+    {
+        isWaitingForAnimationBeforeStatusUpdate = false;
+        pendingTurnUpdate = null;
+
+        // Unsubscribe from animation events to prevent memory leaks
+        ChessPiece.OnMoveAnimationComplete -= OnAnimationCompletedForStatus;
+        Debug.Log($"🎬 PersistentCheckStatusUI: Cleaned up animation waiting state and unsubscribed from events");
     }
 }

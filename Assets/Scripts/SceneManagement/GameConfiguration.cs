@@ -223,7 +223,22 @@ public class GameConfiguration
             enableTimedPlay = this.enableTimedPlay,
             timePerPlayerMinutes = this.timePerPlayerMinutes
         };
-        
+
+        // Copy playerTypes list (critical for multi-player games)
+        Debug.Log($"🔄 GameConfiguration.Clone(): Copying playerTypes list (source count: {this.playerTypes.Count})");
+        for (int i = 0; i < this.playerTypes.Count; i++)
+        {
+            Debug.Log($"🔄   Source playerTypes[{i}] = {this.playerTypes[i]}");
+        }
+
+        copy.playerTypes = new List<PlayerType>(this.playerTypes);
+
+        Debug.Log($"🔄 GameConfiguration.Clone(): After copy (dest count: {copy.playerTypes.Count})");
+        for (int i = 0; i < copy.playerTypes.Count; i++)
+        {
+            Debug.Log($"🔄   Dest playerTypes[{i}] = {copy.playerTypes[i]}");
+        }
+
         return copy;
     }
     

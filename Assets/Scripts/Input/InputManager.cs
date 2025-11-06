@@ -82,10 +82,10 @@ public class InputManager : MonoBehaviour
     /// <summary>
     /// Handle turn change events - automatically deselect pieces from previous turn
     /// </summary>
-    private void OnTurnChanged(PieceColor newCurrentPlayer)
+    private void OnTurnChanged(PieceColor previousPlayer, PieceColor newCurrentPlayer)
     {
-        Debug.Log($"InputManager.OnTurnChanged: Turn changed to {newCurrentPlayer}");
-        
+        Debug.Log($"InputManager.OnTurnChanged: Turn changed from {previousPlayer} to {newCurrentPlayer}");
+
         // If we have a piece selected and it's not the current player's turn, deselect it
         if (selectedPiece != null && selectedPiece.pieceColor != newCurrentPlayer)
         {
@@ -265,10 +265,10 @@ public class InputManager : MonoBehaviour
                 {
                     // During placement phase - allow both tray piece selection and board piece repositioning
                     Debug.Log($"InputManager: PLACEMENT PHASE - Handling piece click for {hitPiece.pieceColor} {hitPiece.pieceType}");
-                    
-                    // Check if this piece is in a tray or on the board
-                    bool pieceInTray = hitPiece.transform.IsChildOf(PieceTray.WhiteTray?.transform) || 
-                                      hitPiece.transform.IsChildOf(PieceTray.BlackTray?.transform);
+
+                    // Check if this piece is in a tray or on the board (supports all 6 player colors)
+                    PieceTray playerTray = PieceTray.GetTrayForColor(hitPiece.pieceColor);
+                    bool pieceInTray = (playerTray != null && hitPiece.transform.IsChildOf(playerTray.transform));
                     
                     // Additional validation: check for position sync issues
                     bool hasPositionIssues = !hitPiece.ValidatePosition();
@@ -718,9 +718,11 @@ public class InputManager : MonoBehaviour
         {
             Debug.Log($"✅ POSITION VALID: {selectedPiece.pieceColor} {selectedPiece.pieceType} at {selectedPiece.CurrentPosition}");
         }
-        
-        HideValidMoveIndicators(); // Clear any existing indicators
-        
+
+        // Clear any existing indicators before creating new ones
+        // This acts as a safety net to ensure clean state, even if DeselectPiece() wasn't called
+        HideValidMoveIndicators();
+
         var validMoves = selectedPiece.GetLegalMoves();
         Debug.Log($"🎯 LEGAL MOVES RESULT: {selectedPiece.pieceColor} {selectedPiece.pieceType} at {selectedPiece.CurrentPosition} has {validMoves.Count} legal moves");
         
@@ -809,7 +811,17 @@ public class InputManager : MonoBehaviour
             
             // Make it glow with a bright material
             Renderer renderer = indicator.GetComponent<Renderer>();
-            Material glowMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+
+            // FIXED: Use shader fallback system (same as check indicators)
+            Shader indicatorShader = GetIndicatorShader();
+            if (indicatorShader == null)
+            {
+                Debug.LogError($"🚨 FAILED to create move indicator for {move}: No suitable shader found!");
+                Destroy(indicator);
+                continue;
+            }
+
+            Material glowMaterial = new Material(indicatorShader);
             
             // SIMPLIFIED CAPTURE CHECK: Streamlined logic with fallback validation
             bool isCapture = false;
@@ -921,9 +933,12 @@ public class InputManager : MonoBehaviour
         {
             if (indicator != null)
             {
-                try 
+                try
                 {
-                    DestroyImmediate(indicator);
+                    // Immediately disable the indicator to make it invisible this frame
+                    // Destroy() schedules destruction at end of frame, so disable ensures instant visual clearing
+                    indicator.SetActive(false);
+                    Destroy(indicator);
                     destroyedCount++;
                 }
                 catch (System.Exception ex)
@@ -964,7 +979,39 @@ public class InputManager : MonoBehaviour
         Debug.Log("InputManager: Clearing move indicators on external request");
         HideValidMoveIndicators();
     }
-    
+
+    /// <summary>
+    /// Get a working shader for indicators with fallback chain
+    /// Uses the same approach as ThreatIndicatorManager for consistency
+    /// </summary>
+    private Shader GetIndicatorShader()
+    {
+        // Try shaders in priority order (same as check indicator system)
+        string[] shaderNames = new string[]
+        {
+            "Transparent/Diffuse",
+            "Legacy Shaders/Transparent/Diffuse",
+            "Sprites/Default"
+        };
+
+        foreach (string shaderName in shaderNames)
+        {
+            Shader shader = Shader.Find(shaderName);
+            if (shader != null)
+            {
+                Debug.Log($"✅ InputManager: Found working shader: {shaderName}");
+                return shader;
+            }
+            else
+            {
+                Debug.LogWarning($"InputManager: Shader '{shaderName}' not found, trying next fallback...");
+            }
+        }
+
+        Debug.LogError("❌ InputManager: No suitable shader found! Indicators will fail to render.");
+        return null;
+    }
+
     private void TryMovePiece(BoardPosition targetPosition)
     {
         Debug.Log($"🚀 TryMovePiece: Called with targetPosition {targetPosition}");

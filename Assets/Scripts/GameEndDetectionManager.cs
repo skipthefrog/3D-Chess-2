@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 /// <summary>
@@ -16,7 +17,10 @@ public class GameEndDetectionManager : MonoBehaviour
     public System.Action<PieceColor> OnCheckmate;
     public System.Action<PieceColor> OnStalemate;
     public System.Action<string> OnGameEnd; // reason for game end
-    
+
+    // Conquest events for multi-player games
+    public System.Action<PieceColor, PieceColor, int> OnConquest; // (conqueror, defeated, pieces transferred)
+
     // New forfeit and draw events
     public System.Action<PieceColor> OnForfeit; // player who forfeited
     public System.Action<PieceColor> OnDrawOffered; // player who offered draw
@@ -119,17 +123,18 @@ public class GameEndDetectionManager : MonoBehaviour
         }
     }
     
-    private void OnTurnChanged(PieceColor newCurrentPlayer)
+    private void OnTurnChanged(PieceColor previousPlayer, PieceColor newCurrentPlayer)
     {
         if (!enableGameEndDetection) return;
-        
+
         // When a turn changes, check if the new current player has any legal moves
         if (!HasLegalMoves(newCurrentPlayer))
         {
             // No legal moves - check if it's checkmate or stalemate
             if (CheckDetectionManager.Instance != null && CheckDetectionManager.Instance.IsKingInCheck(newCurrentPlayer))
             {
-                HandleCheckmate(newCurrentPlayer);
+                // Pass previousPlayer as the one who delivered checkmate
+                HandleCheckmate(newCurrentPlayer, previousPlayer);
             }
             else
             {
@@ -299,33 +304,137 @@ public class GameEndDetectionManager : MonoBehaviour
     }
     
     /// <summary>
-    /// Handle checkmate detection - end the game
+    /// Handle checkmate detection - end game or trigger conquest based on player count
     /// </summary>
-    private void HandleCheckmate(PieceColor checkmatedPlayer)
+    /// <param name="checkmatedPlayer">The player who was checkmated</param>
+    /// <param name="lastMover">The player who just moved (delivered checkmate). Optional - if not provided, will be determined from game state</param>
+    private void HandleCheckmate(PieceColor checkmatedPlayer, PieceColor? lastMover = null)
     {
-        PieceColor winner = (checkmatedPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+        Debug.Log($"🏁 GameEndDetectionManager: CHECKMATE DETECTED for {checkmatedPlayer}, lastMover: {lastMover?.ToString() ?? "unknown"}");
+
+        // Get active player count to determine if this triggers conquest or game end
+        int activePlayerCount = PlayerManager.Instance != null
+            ? PlayerManager.Instance.GetActivePlayerCount()
+            : 2;
+
+        Debug.Log($"🏁 Active player count: {activePlayerCount}");
+
+        if (activePlayerCount > 2)
+        {
+            // MULTI-PLAYER CONQUEST: Transfer pieces instead of ending game
+            HandleConquest(checkmatedPlayer, lastMover);
+        }
+        else
+        {
+            // FINAL SHOWDOWN: Only 2 players left, end the game
+            HandleFinalCheckmate(checkmatedPlayer);
+        }
+    }
+
+    /// <summary>
+    /// Handle conquest when a player is checkmated with more than 2 players remaining
+    /// Transfer all checkmated player's pieces to the conquering player
+    /// </summary>
+    /// <param name="checkmatedPlayer">The player who was checkmated</param>
+    /// <param name="lastMover">The player who just moved (delivered checkmate). Optional - if not provided, will be determined from game state</param>
+    private void HandleConquest(PieceColor checkmatedPlayer, PieceColor? lastMover = null)
+    {
+        if (PlayerManager.Instance == null)
+        {
+            Debug.LogError("GameEndDetectionManager.HandleConquest: PlayerManager.Instance is null!");
+            return;
+        }
+
+        // Determine who gets the conquered pieces
+        PieceColor conqueror;
+        if (lastMover.HasValue)
+        {
+            // Use the provided lastMover (most reliable - comes directly from turn system)
+            conqueror = lastMover.Value;
+            Debug.Log($"🎨 CONQUEST: Using lastMover from turn system: {conqueror}");
+        }
+        else
+        {
+            // Fallback to detection logic (used when checkmate detected from check event)
+            conqueror = PlayerManager.Instance.GetCheckmateTriggeringPlayer(checkmatedPlayer);
+            Debug.Log($"🎨 CONQUEST: Using fallback detection logic: {conqueror}");
+        }
+
+        Debug.Log($"🎨 CONQUEST: {conqueror} has checkmated {checkmatedPlayer}!");
+
+        // Transfer all pieces from checkmated player to conqueror
+        int piecesTransferred = PlayerManager.Instance.TransferPiecesToPlayer(checkmatedPlayer, conqueror);
+
+        // Eliminate the checkmated player
+        PlayerManager.Instance.EliminatePlayer(checkmatedPlayer);
+
+        // Get updated active player count
+        int remainingPlayers = PlayerManager.Instance.GetActivePlayerCount();
+
+        string conquestMessage = $"Conquest! {conqueror} checkmated {checkmatedPlayer} and conquered {piecesTransferred} pieces! {remainingPlayers} players remain.";
+
+        Debug.Log($"🎨 {conquestMessage}");
+
+        // Fire conquest events (will be used by UI)
+        OnCheckmate?.Invoke(checkmatedPlayer);
+        OnConquest?.Invoke(conqueror, checkmatedPlayer, piecesTransferred);
+
+        // Invalidate check detection cache since piece colors changed
+        if (CheckDetectionManager.Instance != null)
+        {
+            CheckDetectionManager.Instance.InvalidateCache();
+        }
+
+        // Continue game - do NOT change to GameOver state
+        Debug.Log($"🎮 Game continues with {remainingPlayers} players remaining");
+    }
+
+    /// <summary>
+    /// Handle final checkmate when only 2 players remain - end the game
+    /// </summary>
+    private void HandleFinalCheckmate(PieceColor checkmatedPlayer)
+    {
+        // Determine winner in 2-player scenario
+        PieceColor winner;
+        if (PlayerManager.Instance != null)
+        {
+            List<PieceColor> activePlayers = PlayerManager.Instance.GetActivePlayers();
+            // Winner is the remaining active player who is not checkmated
+            winner = activePlayers.FirstOrDefault(p => p != checkmatedPlayer);
+            if (winner == default(PieceColor))
+            {
+                // Fallback
+                winner = (checkmatedPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+            }
+        }
+        else
+        {
+            // Fallback for 2-player games without PlayerManager
+            winner = (checkmatedPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+        }
+
         string reason = $"Checkmate! {winner} wins by checkmate against {checkmatedPlayer}";
-        
-        Debug.Log($"🏁 GameEndDetectionManager: CHECKMATE DETECTED - {reason}");
-        
+
+        Debug.Log($"🏁 GameEndDetectionManager: FINAL CHECKMATE - {reason}");
+
         // Stop timers immediately to prevent them from continuing after checkmate
         if (TimerManager.Instance != null)
         {
             TimerManager.Instance.StopAllTimers();
             Debug.Log("🛑 GameEndDetectionManager: Stopped all timers due to checkmate");
         }
-        
+
         // Fire events
         OnCheckmate?.Invoke(checkmatedPlayer);
         OnGameEnd?.Invoke(reason);
-        
+
         // End the game
         if (GameStateManager.Instance != null)
         {
             GameStateManager.Instance.ChangeState(GameState.GameOver);
         }
-        
-        // Show checkmate message (could be enhanced with UI later)
+
+        // Show checkmate message
         Debug.Log($"🏁 GAME OVER: {reason}");
     }
     
@@ -334,29 +443,59 @@ public class GameEndDetectionManager : MonoBehaviour
     /// </summary>
     private void HandleStalemate(PieceColor stalematedPlayer)
     {
-        string reason = $"Stalemate! Game ends in a draw - {stalematedPlayer} has no legal moves but is not in check";
-        
-        Debug.Log($"🏁 GameEndDetectionManager: STALEMATE DETECTED - {reason}");
-        
-        // Stop timers immediately to prevent them from continuing after stalemate
-        if (TimerManager.Instance != null)
+        // Check active player count to determine behavior
+        int activePlayerCount = PlayerManager.Instance != null
+            ? PlayerManager.Instance.GetActivePlayerCount()
+            : 2;
+
+        if (activePlayerCount > 2)
         {
-            TimerManager.Instance.StopAllTimers();
-            Debug.Log("🛑 GameEndDetectionManager: Stopped all timers due to stalemate");
+            // MULTIPLAYER: Player has no legal moves - skip their turn and continue game
+            string message = $"{stalematedPlayer} has no legal moves but is not in check - skipping turn";
+
+            Debug.Log($"⏭️ GameEndDetectionManager: TURN SKIP - {message}");
+
+            // Fire stalemate event (for UI notification/logging)
+            OnStalemate?.Invoke(stalematedPlayer);
+
+            // Skip to next player's turn (do NOT end game)
+            if (TurnManager.Instance != null)
+            {
+                TurnManager.Instance.NextTurn();
+                Debug.Log($"⏭️ GameEndDetectionManager: Advanced to next player after {stalematedPlayer} skip");
+            }
+            else
+            {
+                Debug.LogError("⚠️ GameEndDetectionManager: TurnManager is null, cannot skip turn!");
+            }
         }
-        
-        // Fire events
-        OnStalemate?.Invoke(stalematedPlayer);
-        OnGameEnd?.Invoke(reason);
-        
-        // End the game
-        if (GameStateManager.Instance != null)
+        else
         {
-            GameStateManager.Instance.ChangeState(GameState.GameOver);
+            // 2-PLAYER: Traditional stalemate = draw, end game
+            string reason = $"Stalemate! Game ends in a draw - {stalematedPlayer} has no legal moves but is not in check";
+
+            Debug.Log($"🏁 GameEndDetectionManager: STALEMATE DETECTED - {reason}");
+
+            // Stop timers immediately to prevent them from continuing after stalemate
+            if (TimerManager.Instance != null)
+            {
+                TimerManager.Instance.StopAllTimers();
+                Debug.Log("🛑 GameEndDetectionManager: Stopped all timers due to stalemate");
+            }
+
+            // Fire events
+            OnStalemate?.Invoke(stalematedPlayer);
+            OnGameEnd?.Invoke(reason);
+
+            // End the game
+            if (GameStateManager.Instance != null)
+            {
+                GameStateManager.Instance.ChangeState(GameState.GameOver);
+            }
+
+            // Show stalemate message (could be enhanced with UI later)
+            Debug.Log($"🏁 GAME OVER: {reason}");
         }
-        
-        // Show stalemate message (could be enhanced with UI later)
-        Debug.Log($"🏁 GAME OVER: {reason}");
     }
     
     /// <summary>

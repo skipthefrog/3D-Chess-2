@@ -26,6 +26,10 @@ public class PieceTray : MonoBehaviour
     
     public static PieceTray WhiteTray { get; private set; }
     public static PieceTray BlackTray { get; private set; }
+    public static PieceTray GreenTray { get; private set; }
+    public static PieceTray PurpleTray { get; private set; }
+    public static PieceTray YellowTray { get; private set; }
+    public static PieceTray OrangeTray { get; private set; }
     
     private void Awake()
     {
@@ -51,46 +55,128 @@ public class PieceTray : MonoBehaviour
         Debug.Log($"PieceTray.Initialize: Set trayColor = {trayColor}, isLeftSide = {isLeftSide}");
         
         // Register tray instances for easy access (prevent duplicates)
-        if (trayColor == PieceColor.White)
+        switch (trayColor)
         {
-            if (WhiteTray == null)
-            {
-                WhiteTray = this;
-                Debug.Log("✅ PieceTray: White tray registered successfully");
-            }
-            else if (WhiteTray != this)
-            {
-                Debug.LogError($"❌ PieceTray: White tray already exists ({WhiteTray.name})! Cannot register duplicate.");
+            case PieceColor.White:
+                if (WhiteTray == null)
+                {
+                    WhiteTray = this;
+                    Debug.Log("✅ PieceTray: White tray registered successfully");
+                }
+                else if (WhiteTray != this)
+                {
+                    Debug.LogError($"❌ PieceTray: White tray already exists ({WhiteTray.name})! Cannot register duplicate.");
+                    return;
+                }
+                else
+                {
+                    Debug.Log("PieceTray: White tray already registered to this object");
+                }
+                break;
+
+            case PieceColor.Black:
+                if (BlackTray == null)
+                {
+                    BlackTray = this;
+                    Debug.Log("✅ PieceTray: Black tray registered successfully");
+                }
+                else if (BlackTray != this)
+                {
+                    Debug.LogError($"❌ PieceTray: Black tray already exists ({BlackTray.name})! Cannot register duplicate.");
+                    return;
+                }
+                else
+                {
+                    Debug.Log("PieceTray: Black tray already registered to this object");
+                }
+                break;
+
+            case PieceColor.Green:
+                if (GreenTray == null)
+                {
+                    GreenTray = this;
+                    Debug.Log("✅ PieceTray: Green tray registered successfully");
+                }
+                else if (GreenTray != this)
+                {
+                    Debug.LogError($"❌ PieceTray: Green tray already exists ({GreenTray.name})! Cannot register duplicate.");
+                    return;
+                }
+                else
+                {
+                    Debug.Log("PieceTray: Green tray already registered to this object");
+                }
+                break;
+
+            case PieceColor.Purple:
+                if (PurpleTray == null)
+                {
+                    PurpleTray = this;
+                    Debug.Log("✅ PieceTray: Purple tray registered successfully");
+                }
+                else if (PurpleTray != this)
+                {
+                    Debug.LogError($"❌ PieceTray: Purple tray already exists ({PurpleTray.name})! Cannot register duplicate.");
+                    return;
+                }
+                else
+                {
+                    Debug.Log("PieceTray: Purple tray already registered to this object");
+                }
+                break;
+
+            case PieceColor.Yellow:
+                if (YellowTray == null)
+                {
+                    YellowTray = this;
+                    Debug.Log("✅ PieceTray: Yellow tray registered successfully");
+                }
+                else if (YellowTray != this)
+                {
+                    Debug.LogError($"❌ PieceTray: Yellow tray already exists ({YellowTray.name})! Cannot register duplicate.");
+                    return;
+                }
+                else
+                {
+                    Debug.Log("PieceTray: Yellow tray already registered to this object");
+                }
+                break;
+
+            case PieceColor.Orange:
+                if (OrangeTray == null)
+                {
+                    OrangeTray = this;
+                    Debug.Log("✅ PieceTray: Orange tray registered successfully");
+                }
+                else if (OrangeTray != this)
+                {
+                    Debug.LogError($"❌ PieceTray: Orange tray already exists ({OrangeTray.name})! Cannot register duplicate.");
+                    return;
+                }
+                else
+                {
+                    Debug.Log("PieceTray: Orange tray already registered to this object");
+                }
+                break;
+
+            default:
+                Debug.LogError($"PieceTray: Invalid tray color {trayColor}!");
                 return;
-            }
-            else
-            {
-                Debug.Log("PieceTray: White tray already registered to this object");
-            }
         }
-        else if (trayColor == PieceColor.Black)
+
+        // CRITICAL: Register with PieceTrayManager to ensure both tracking systems stay in sync
+        // This fixes the bug where AIPlayer uses PieceTrayManager.GetTray() but PlacementManager uses GetTrayForColor()
+        if (PieceTrayManager.Instance != null)
         {
-            if (BlackTray == null)
-            {
-                BlackTray = this;
-                Debug.Log("✅ PieceTray: Black tray registered successfully");
-            }
-            else if (BlackTray != this)
-            {
-                Debug.LogError($"❌ PieceTray: Black tray already exists ({BlackTray.name})! Cannot register duplicate.");
-                return;
-            }
-            else
-            {
-                Debug.Log("PieceTray: Black tray already registered to this object");
-            }
+            PieceTrayManager.Instance.RegisterTray(trayColor, this);
+            Debug.Log($"✅ PieceTray: Registered {trayColor} tray with PieceTrayManager");
         }
         else
         {
-            Debug.LogError($"PieceTray: Invalid tray color {trayColor}!");
-            return;
+            Debug.LogWarning($"⚠️ PieceTray: PieceTrayManager.Instance is null - cannot register {trayColor} tray");
+            Debug.LogWarning($"   This may cause tray lookup inconsistencies between different code paths");
         }
-        
+
         // Now set up the tray visuals and positions
         Debug.Log($"PieceTray.Initialize: About to call SetupTray for {trayColor}");
         SetupTray();
@@ -118,42 +204,84 @@ public class PieceTray : MonoBehaviour
     }
     
     /// <summary>
-    /// Position the tray beside the 4x4x4 board with proper coordinate system alignment
+    /// Position the tray beside the board with proper coordinate system alignment
+    /// Dynamically scales tray position based on board size (4x4x4, 6x6x6, or 8x8x8)
+    /// Supports 2-player, 4-player, and 6-player layouts
+    /// 6-player layout: Orange=top, Yellow=bottom, White=left, Black=right, Green=front, Purple=back
     /// </summary>
     private void CalculateTrayPosition()
     {
-        // CORRECTED COORDINATE SYSTEM ANALYSIS:
-        // - Board Rotator: at world origin (0, 0, 0)
-        // - Emergency Chess Board: child with local offset (-4.2, -4.2, -4.2)
-        // - Floor planes: positioned at x*2.8, y*2.8, z*2.8 then parented to Emergency Chess Board
-        // - ACTUAL world bounds: X [-4.2 to 4.2], Y [-9.8 to 1.4], Z [-4.2 to 4.2]
-        // - Board center in world space: (0, -4.2, 0)
-        
-        // Calculate correct board bounds in world coordinates
+        // Get dynamic board dimensions from BoardDimensionsManager
+        Vector3Int boardDims = BoardDimensionsManager.Instance != null
+            ? BoardDimensionsManager.Instance.GetDimensions()
+            : new Vector3Int(4, 4, 4); // Fallback to 4x4x4
+
+        Debug.Log($"PieceTray: Calculating tray position for {boardDims.x}x{boardDims.y}x{boardDims.z} board");
+        Debug.Log($"PieceTray: This is {trayColor} tray");
+
+        // Calculate board bounds dynamically based on actual board size
         float cellSize = 2.8f;
-        float halfBoardSize = (4 * cellSize) / 2f; // 4 cells * 2.8 / 2 = 5.6, but offset by -4.2 makes range -4.2 to 4.2
-        float boardLeftEdge = -4.2f;   // Actual leftmost edge in world space
-        float boardRightEdge = 4.2f;   // Actual rightmost edge in world space
-        float traySpacing = 8.0f;      // Maximum spacing for clear board visibility during piece placement
-        
-        // Position trays at a visible height (above the board center level)
-        float trayHeight = -1.0f; // Above board center (-4.2) but not too high
-        
+        float halfBoardSize = (boardDims.x * cellSize) / 2f;
+        float boardLeftEdge = -halfBoardSize;   // X minimum
+        float boardRightEdge = halfBoardSize;   // X maximum
+        float boardFrontEdge = -halfBoardSize;  // Z minimum
+        float boardBackEdge = halfBoardSize;    // Z maximum
+        float boardBottomEdge = -halfBoardSize; // Y minimum
+        float boardTopEdge = halfBoardSize;     // Y maximum
+
+        Debug.Log($"PieceTray: Board edges - X:[{boardLeftEdge},{boardRightEdge}] Y:[{boardBottomEdge},{boardTopEdge}] Z:[{boardFrontEdge},{boardBackEdge}]");
+
+        // Tray spacing: 6 units from board edge
+        float traySpacing = 6.0f;
+
+        // Default tray height (for left/right trays)
+        float trayHeight = -1.0f;
+
         Vector3 trayPosition;
-        
-        if (isLeftSide)
+
+        // Position trays based on player color
+        switch (trayColor)
         {
-            // White tray: Position 8 units to the left of board's left edge
-            float trayX = boardLeftEdge - traySpacing; // -4.2 - 8.0 = -12.2
-            trayPosition = new Vector3(trayX, trayHeight, 0f); // Z=0 for center alignment
-            Debug.Log($"PieceTray: White tray positioned at X={trayX} (left edge {boardLeftEdge} - {traySpacing})");
-        }
-        else
-        {
-            // Black tray: Position 8 units to the right of board's right edge
-            float trayX = boardRightEdge + traySpacing; // 4.2 + 8.0 = 12.2
-            trayPosition = new Vector3(trayX, trayHeight, 0f); // Z=0 for center alignment
-            Debug.Log($"PieceTray: Black tray positioned at X={trayX} (right edge {boardRightEdge} + {traySpacing})");
+            case PieceColor.White:
+                // Left side (negative X)
+                trayPosition = new Vector3(boardLeftEdge - traySpacing, trayHeight, 0f);
+                Debug.Log($"PieceTray: White tray positioned on LEFT at {trayPosition}");
+                break;
+
+            case PieceColor.Black:
+                // Right side (positive X)
+                trayPosition = new Vector3(boardRightEdge + traySpacing, trayHeight, 0f);
+                Debug.Log($"PieceTray: Black tray positioned on RIGHT at {trayPosition}");
+                break;
+
+            case PieceColor.Green:
+                // Front side (negative Z)
+                trayPosition = new Vector3(0f, trayHeight, boardFrontEdge - traySpacing);
+                Debug.Log($"PieceTray: Green tray positioned on FRONT at {trayPosition}");
+                break;
+
+            case PieceColor.Purple:
+                // Back side (positive Z)
+                trayPosition = new Vector3(0f, trayHeight, boardBackEdge + traySpacing);
+                Debug.Log($"PieceTray: Purple tray positioned on BACK at {trayPosition}");
+                break;
+
+            case PieceColor.Yellow:
+                // Bottom (negative Y)
+                trayPosition = new Vector3(0f, boardBottomEdge - traySpacing, 0f);
+                Debug.Log($"PieceTray: Yellow tray positioned on BOTTOM at {trayPosition}");
+                break;
+
+            case PieceColor.Orange:
+                // Top (positive Y)
+                trayPosition = new Vector3(0f, boardTopEdge + traySpacing, 0f);
+                Debug.Log($"PieceTray: Orange tray positioned on TOP at {trayPosition}");
+                break;
+
+            default:
+                Debug.LogError($"PieceTray: Unknown color {trayColor}, defaulting to origin");
+                trayPosition = Vector3.zero;
+                break;
         }
         
         // Find the Board Rotator to ensure trays are children and rotate with the board
@@ -208,7 +336,15 @@ public class PieceTray : MonoBehaviour
         float trayDepth = (maxPieces * pieceSpacing) + 2f;
         
         trayBase.transform.localScale = new Vector3(trayWidth, trayHeight, trayDepth);
-        
+
+        // Rotate trays that are positioned on front/back sides
+        if (trayColor == PieceColor.Green || trayColor == PieceColor.Purple)
+        {
+            // Rotate 90 degrees around Y-axis so tray extends along X-axis instead of Z-axis
+            trayBase.transform.localRotation = Quaternion.Euler(0f, 90f, 0f);
+            Debug.Log($"PieceTray: Rotated {trayColor} tray base 90° for front/back positioning");
+        }
+
         // Apply tray material
         Renderer renderer = trayBase.GetComponent<Renderer>();
         if (trayMaterial == null)
@@ -225,18 +361,51 @@ public class PieceTray : MonoBehaviour
     /// </summary>
     private Material CreateTrayMaterial()
     {
-        Material material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-        
+        // Try URP Lit shader first, fallback to Standard if not available
+        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+        if (shader == null)
+        {
+            shader = Shader.Find("Standard");
+            Debug.LogWarning("PieceTray: URP Lit shader not found, using Standard shader");
+        }
+
+        // If no shader found, use default material
+        if (shader == null)
+        {
+            Debug.LogError("PieceTray: No valid shader found, using default material");
+            return new Material(Shader.Find("Diffuse"));
+        }
+
+        Material material = new Material(shader);
+
         // Different colors for different trays
-        if (trayColor == PieceColor.White)
+        switch (trayColor)
         {
-            material.color = new Color(0.9f, 0.9f, 0.9f, 0.8f); // Light gray
+            case PieceColor.White:
+                material.color = new Color(0.9f, 0.9f, 0.9f, 0.8f); // Light gray
+                break;
+            case PieceColor.Black:
+                material.color = new Color(0.3f, 0.3f, 0.3f, 0.8f); // Dark gray
+                break;
+            case PieceColor.Green:
+                material.color = new Color(0.15f, 0.5f, 0.15f, 0.8f); // Darker forest green
+                break;
+            case PieceColor.Purple:
+                material.color = new Color(0.45f, 0.15f, 0.6f, 0.8f); // Darker purple
+                break;
+            case PieceColor.Yellow:
+                material.color = new Color(0.9f, 0.9f, 0.2f, 0.8f); // Yellow
+                break;
+            case PieceColor.Orange:
+                material.color = new Color(1.0f, 0.5f, 0.0f, 0.8f); // Orange
+                break;
+            default:
+                material.color = new Color(0.5f, 0.5f, 0.5f, 0.8f); // Default gray
+                break;
         }
-        else
-        {
-            material.color = new Color(0.3f, 0.3f, 0.3f, 0.8f); // Dark gray
-        }
-        
+
+        Debug.Log($"PieceTray: Created material with color {material.color} using shader {shader.name}");
+
         return material;
     }
     
@@ -246,21 +415,36 @@ public class PieceTray : MonoBehaviour
     private void CalculatePiecePositions()
     {
         piecePositions.Clear();
-        
-        // Arrange pieces in a line along the tray
-        float startZ = -(maxPieces - 1) * pieceSpacing * 0.5f;
-        
+
+        // Determine which axis to arrange pieces along based on tray orientation
+        bool arrangeAlongX = (trayColor == PieceColor.Green || trayColor == PieceColor.Purple);
+
+        // Arrange pieces in a line along the appropriate axis
+        float startOffset = -(maxPieces - 1) * pieceSpacing * 0.5f;
+
         Debug.Log($"PieceTray: Calculating piece positions for {trayColor} tray:");
         Debug.Log($"  maxPieces: {maxPieces}, pieceSpacing: {pieceSpacing}");
-        Debug.Log($"  startZ: {startZ}");
-        
+        Debug.Log($"  Arranging along: {(arrangeAlongX ? "X-axis" : "Z-axis")}");
+        Debug.Log($"  startOffset: {startOffset}");
+
         for (int i = 0; i < maxPieces; i++)
         {
-            Vector3 localPos = new Vector3(0f, 1f, startZ + (i * pieceSpacing));
+            Vector3 localPos;
+            if (arrangeAlongX)
+            {
+                // Green/Purple trays: arrange pieces along X-axis
+                localPos = new Vector3(startOffset + (i * pieceSpacing), 1f, 0f);
+            }
+            else
+            {
+                // White/Black/Yellow/Orange trays: arrange pieces along Z-axis
+                localPos = new Vector3(0f, 1f, startOffset + (i * pieceSpacing));
+            }
+
             piecePositions.Add(localPos);
             Debug.Log($"  Slot {i}: local position {localPos}");
         }
-        
+
         Debug.Log($"PieceTray: Calculated {piecePositions.Count} piece positions for {trayColor} tray");
     }
     
@@ -331,29 +515,109 @@ public class PieceTray : MonoBehaviour
     
     /// <summary>
     /// Remove a piece from this tray
+    /// ROBUST VERSION: Handles list/GameObject hierarchy desync issues
     /// </summary>
     public bool RemovePiece(ChessPiece piece)
     {
-        if (!piecesInTray.Contains(piece))
+        Debug.Log($"🔍 PieceTray.RemovePiece: Called for {piece.pieceColor} {piece.pieceType} on {trayColor} tray");
+        Debug.Log($"🔍   piecesInTray.Count = {piecesInTray.Count}");
+        Debug.Log($"🔍   piece.GetInstanceID() = {piece.GetInstanceID()}");
+
+        bool foundInList = piecesInTray.Contains(piece);
+        bool foundInHierarchy = (piece.transform.parent == this.transform);
+
+        Debug.Log($"🔍   foundInList: {foundInList}");
+        Debug.Log($"🔍   foundInHierarchy: {foundInHierarchy}");
+
+        // Log all pieces in list for debugging
+        Debug.Log($"🔍   Pieces in piecesInTray list:");
+        for (int i = 0; i < piecesInTray.Count; i++)
         {
-            Debug.LogWarning($"PieceTray: {piece.pieceColor} {piece.pieceType} not found in {trayColor} tray");
+            if (piecesInTray[i] != null)
+            {
+                Debug.Log($"🔍     [{i}] {piecesInTray[i].pieceColor} {piecesInTray[i].pieceType} (ID: {piecesInTray[i].GetInstanceID()})");
+            }
+            else
+            {
+                Debug.Log($"🔍     [{i}] NULL");
+            }
+        }
+
+        // Check if piece exists as child GameObject (even if not in list)
+        ChessPiece[] childPieces = GetComponentsInChildren<ChessPiece>();
+        Debug.Log($"🔍   Found {childPieces.Length} child pieces in GameObject hierarchy");
+
+        bool foundAsChild = false;
+        for (int i = 0; i < childPieces.Length; i++)
+        {
+            if (childPieces[i] == piece)
+            {
+                foundAsChild = true;
+                Debug.Log($"🔍   Piece found in hierarchy at child index {i}");
+                break;
+            }
+        }
+
+        if (!foundInList && !foundInHierarchy && !foundAsChild)
+        {
+            Debug.LogWarning($"⚠️ PieceTray.RemovePiece: {piece.pieceColor} {piece.pieceType} not found in {trayColor} tray (neither list nor hierarchy)");
             return false;
         }
-        
-        piecesInTray.Remove(piece);
-        
-        // IMPORTANT: Remove piece from tray's transform hierarchy 
-        // This ensures InputManager won't think it's still in the tray
+
+        // DESYNC DETECTED: Piece is in hierarchy but not in list
+        if (!foundInList && (foundInHierarchy || foundAsChild))
+        {
+            Debug.LogError($"🚨 DESYNC DETECTED: {piece.pieceColor} {piece.pieceType} is in {trayColor} tray hierarchy but NOT in piecesInTray list!");
+            Debug.LogError($"🚨 This is the bug causing Green/Purple to think they have no pieces left!");
+            Debug.LogError($"🚨 Attempting to remove from hierarchy anyway...");
+
+            // Try to find a matching piece in the list by color/type
+            ChessPiece matchingPiece = null;
+            for (int i = 0; i < piecesInTray.Count; i++)
+            {
+                if (piecesInTray[i] != null &&
+                    piecesInTray[i].pieceColor == piece.pieceColor &&
+                    piecesInTray[i].pieceType == piece.pieceType)
+                {
+                    matchingPiece = piecesInTray[i];
+                    Debug.Log($"🔍 Found matching piece in list at index {i}: {matchingPiece.pieceColor} {matchingPiece.pieceType} (ID: {matchingPiece.GetInstanceID()})");
+                    break;
+                }
+            }
+
+            if (matchingPiece != null && matchingPiece != piece)
+            {
+                Debug.LogError($"🚨 Found different instance of same piece type in list!");
+                Debug.LogError($"🚨   Requested piece ID: {piece.GetInstanceID()}");
+                Debug.LogError($"🚨   List piece ID: {matchingPiece.GetInstanceID()}");
+                Debug.LogError($"🚨 This suggests duplicate piece instances - removing both to be safe");
+
+                piecesInTray.Remove(matchingPiece);
+            }
+        }
+
+        // Remove from list if present (safe even if already checked)
+        if (foundInList)
+        {
+            piecesInTray.Remove(piece);
+            Debug.Log($"✅ Removed {piece.pieceColor} {piece.pieceType} from piecesInTray list");
+        }
+
+        // ALWAYS remove from GameObject hierarchy if present
         if (piece.transform.parent == this.transform)
         {
             piece.transform.SetParent(null); // Remove from tray hierarchy
-            Debug.Log($"🔄 PieceTray: Removed {piece.pieceColor} {piece.pieceType} from tray transform hierarchy");
+            Debug.Log($"✅ Removed {piece.pieceColor} {piece.pieceType} from tray transform hierarchy");
         }
-        
+
+        // Verify removal succeeded
+        Debug.Log($"🔍 After removal: piecesInTray.Count = {piecesInTray.Count}");
+        Debug.Log($"🔍 After removal: GetComponentsInChildren<ChessPiece>().Length = {GetComponentsInChildren<ChessPiece>().Length}");
+
         // Attempt to reorganize remaining pieces (will be skipped if reorganization is disabled)
         Debug.Log($"🔄 PieceTray: Attempting to reorganize {trayColor} tray after removal (enableReorganization: {enableReorganization})");
         ReorganizePieces();
-        
+
         Debug.Log($"✅ PieceTray: Successfully removed {piece.pieceColor} {piece.pieceType} from {trayColor} tray");
         return true;
     }
@@ -465,7 +729,7 @@ public class PieceTray : MonoBehaviour
     {
         SetTrayVisibility(false);
     }
-    
+
     /// <summary>
     /// Show this tray
     /// </summary>
@@ -473,29 +737,71 @@ public class PieceTray : MonoBehaviour
     {
         SetTrayVisibility(true);
     }
+
+    /// <summary>
+    /// Get the tray for a specific player color
+    /// CRITICAL FIX: Uses PieceTrayManager as single source of truth to prevent desync
+    /// </summary>
+    public static PieceTray GetTrayForColor(PieceColor color)
+    {
+        // CRITICAL FIX: Use PieceTrayManager as the single source of truth
+        // This prevents desync between static properties and PieceTrayManager dictionary
+        // Both AIPlayer (via PieceTrayManager.GetTray) and PlacementManager (via this method)
+        // will now access the same tray instance, fixing the bug where Purple/Green AI
+        // fail to place their last pieces because they see different tray piece counts
+        if (PieceTrayManager.Instance != null)
+        {
+            PieceTray tray = PieceTrayManager.Instance.GetTray(color);
+            if (tray != null)
+            {
+                return tray;
+            }
+        }
+
+        // Fallback to static properties for backward compatibility
+        // (e.g., if PieceTrayManager hasn't been created yet)
+        return color switch
+        {
+            PieceColor.White => WhiteTray,
+            PieceColor.Black => BlackTray,
+            PieceColor.Green => GreenTray,
+            PieceColor.Purple => PurpleTray,
+            PieceColor.Yellow => YellowTray,
+            PieceColor.Orange => OrangeTray,
+            _ => null
+        };
+    }
     
     /// <summary>
-    /// Hide both trays from view
+    /// Hide all trays from view
     /// </summary>
     public static void HideAllTrays()
     {
         if (WhiteTray != null) WhiteTray.HideTray();
         if (BlackTray != null) BlackTray.HideTray();
+        if (GreenTray != null) GreenTray.HideTray();
+        if (PurpleTray != null) PurpleTray.HideTray();
+        if (YellowTray != null) YellowTray.HideTray();
+        if (OrangeTray != null) OrangeTray.HideTray();
         Debug.Log("PieceTray: All trays hidden");
     }
-    
+
     /// <summary>
-    /// Show both trays
+    /// Show all trays
     /// </summary>
     public static void ShowAllTrays()
     {
         if (WhiteTray != null) WhiteTray.ShowTray();
         if (BlackTray != null) BlackTray.ShowTray();
+        if (GreenTray != null) GreenTray.ShowTray();
+        if (PurpleTray != null) PurpleTray.ShowTray();
+        if (YellowTray != null) YellowTray.ShowTray();
+        if (OrangeTray != null) OrangeTray.ShowTray();
         Debug.Log("PieceTray: All trays shown");
     }
-    
+
     /// <summary>
-    /// Set visibility of both trays
+    /// Set visibility of all trays
     /// </summary>
     public static void SetAllTraysVisible(bool visible)
     {
@@ -511,17 +817,14 @@ public class PieceTray : MonoBehaviour
     public static void ValidateAndRecoverAllTrayPieces()
     {
         Debug.Log("🚨 PieceTray.ValidateAndRecoverAllTrayPieces: Starting emergency piece recovery");
-        
-        if (WhiteTray != null)
-        {
-            WhiteTray.ValidateAndRecoverTrayPieces();
-        }
-        
-        if (BlackTray != null)
-        {
-            BlackTray.ValidateAndRecoverTrayPieces();
-        }
-        
+
+        if (WhiteTray != null) WhiteTray.ValidateAndRecoverTrayPieces();
+        if (BlackTray != null) BlackTray.ValidateAndRecoverTrayPieces();
+        if (GreenTray != null) GreenTray.ValidateAndRecoverTrayPieces();
+        if (PurpleTray != null) PurpleTray.ValidateAndRecoverTrayPieces();
+        if (YellowTray != null) YellowTray.ValidateAndRecoverTrayPieces();
+        if (OrangeTray != null) OrangeTray.ValidateAndRecoverTrayPieces();
+
         Debug.Log("🚨 PieceTray.ValidateAndRecoverAllTrayPieces: Emergency recovery completed");
     }
     
@@ -599,42 +902,36 @@ public class PieceTray : MonoBehaviour
     }
     
     /// <summary>
-    /// Enable or disable automatic reorganization for both trays
+    /// Enable or disable automatic reorganization for all trays
     /// </summary>
     public static void SetReorganizationEnabled(bool enabled)
     {
         Debug.Log($"🔄 PieceTray.SetReorganizationEnabled: Setting reorganization to {enabled} for all trays");
-        
-        if (WhiteTray != null)
-        {
-            WhiteTray.enableReorganization = enabled;
-            Debug.Log($"🔄 White tray reorganization: {enabled}");
-        }
-        
-        if (BlackTray != null)
-        {
-            BlackTray.enableReorganization = enabled;
-            Debug.Log($"🔄 Black tray reorganization: {enabled}");
-        }
+
+        if (WhiteTray != null) WhiteTray.enableReorganization = enabled;
+        if (BlackTray != null) BlackTray.enableReorganization = enabled;
+        if (GreenTray != null) GreenTray.enableReorganization = enabled;
+        if (PurpleTray != null) PurpleTray.enableReorganization = enabled;
+        if (YellowTray != null) YellowTray.enableReorganization = enabled;
+        if (OrangeTray != null) OrangeTray.enableReorganization = enabled;
+
+        Debug.Log($"🔄 Reorganization set to {enabled} for all active trays");
     }
-    
+
     /// <summary>
-    /// Force reorganization of pieces in both trays
+    /// Force reorganization of pieces in all trays
     /// </summary>
     public static void ForceReorganizeAllTrays()
     {
         Debug.Log($"🔄 PieceTray.ForceReorganizeAllTrays: Manually reorganizing all trays");
-        
-        if (WhiteTray != null)
-        {
-            WhiteTray.ForceReorganizePieces();
-        }
-        
-        if (BlackTray != null)
-        {
-            BlackTray.ForceReorganizePieces();
-        }
-        
+
+        if (WhiteTray != null) WhiteTray.ForceReorganizePieces();
+        if (BlackTray != null) BlackTray.ForceReorganizePieces();
+        if (GreenTray != null) GreenTray.ForceReorganizePieces();
+        if (PurpleTray != null) PurpleTray.ForceReorganizePieces();
+        if (YellowTray != null) YellowTray.ForceReorganizePieces();
+        if (OrangeTray != null) OrangeTray.ForceReorganizePieces();
+
         Debug.Log($"🔄 PieceTray.ForceReorganizeAllTrays: Completed");
     }
 }

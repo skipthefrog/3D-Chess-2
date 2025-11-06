@@ -116,12 +116,12 @@ public class GameMenuUI : MonoBehaviour
         aiDrawOfferStyle.normal.textColor = new Color(1f, 0.6f, 0.3f, 1f); // Orange
         aiDrawOfferStyle.wordWrap = true;
         
-        // Calculate menu rect
-        float menuWidth = Screen.width * 0.35f;
-        float menuHeight = Screen.height * 0.5f;
+        // Calculate menu rect - FIXED SIZE to always accommodate 4 buttons
+        float menuWidth = 400f;  // Fixed width
+        float menuHeight = 380f; // Fixed height (title + status + 4 buttons + padding)
         float menuX = (Screen.width - menuWidth) / 2f;
         float menuY = (Screen.height - menuHeight) / 2f;
-        
+
         menuRect = new Rect(menuX, menuY, menuWidth, menuHeight);
         overlayRect = new Rect(0, 0, Screen.width, Screen.height);
         
@@ -396,92 +396,33 @@ public class GameMenuUI : MonoBehaviour
             GUILayout.Space(10);
         }
         
-        // Draw-related buttons (only show during active game)
+        // Draw-related buttons - ALWAYS SHOW (button slot always present for fixed menu size)
         if (!gameOver && TurnManager.Instance != null && GameEndDetectionManager.Instance != null)
         {
             bool canOfferDraw = TurnManager.Instance.CanCurrentPlayerOfferDraw();
             bool canRespondToDraw = TurnManager.Instance.CanCurrentPlayerRespondToDraw();
             bool isDrawPending = GameEndDetectionManager.Instance.IsDrawOfferPending();
-            bool isHumanVsAI = IsHumanVsAIMode();
-            
+
             if (canRespondToDraw && isDrawPending)
             {
-                // Show accept/decline buttons when responding to draw
-                PieceColor offeringPlayer = GameEndDetectionManager.Instance.GetDrawOfferingPlayer();
-                
-                // Enhanced indication for Human vs AI mode
-                if (isHumanVsAI)
+                // Show accept/decline buttons side by side when responding to draw offer
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("Accept Draw (Y)", buttonStyle, GUILayout.Height(40)))
                 {
-                    PieceColor humanPlayer = GetHumanPlayerColor();
-                    bool aiOfferedDraw = (offeringPlayer != humanPlayer);
-                    
-                    // Add visual separator for draw offers
-                    GUILayout.Box("", GUILayout.Height(2), GUILayout.ExpandWidth(true));
-                    GUILayout.Space(5);
-                    
-                    if (aiOfferedDraw)
-                    {
-                        GUILayout.Label("🤖 AI has offered a draw", aiDrawOfferStyle);
-                        GUILayout.Label("What would you like to do?", infoStyle);
-                    }
-                    else
-                    {
-                        GUILayout.Label("⏳ Draw offer sent", humanDrawOfferStyle);
-                        GUILayout.Label("Waiting for AI to respond...", infoStyle);
-                    }
-                    
-                    GUILayout.Space(3);
-                    GUILayout.Box("", GUILayout.Height(2), GUILayout.ExpandWidth(true));
+                    HandleDrawAccept();
                 }
-                else
+                if (GUILayout.Button("Decline Draw (N)", buttonStyle, GUILayout.Height(40)))
                 {
-                    // Original behavior for other game modes
-                    GUILayout.Label($"Draw offered by {offeringPlayer}", infoStyle);
+                    HandleDrawDecline();
                 }
-                
-                GUILayout.Space(5);
-                
-                // Only show accept/decline buttons if human can respond
-                if (canRespondToDraw)
-                {
-                    GUILayout.BeginHorizontal();
-                    if (GUILayout.Button("Accept Draw (Y)", buttonStyle, GUILayout.Height(40)))
-                    {
-                        HandleDrawAccept();
-                    }
-                    if (GUILayout.Button("Decline Draw (N)", buttonStyle, GUILayout.Height(40)))
-                    {
-                        HandleDrawDecline();
-                    }
-                    GUILayout.EndHorizontal();
-                }
+                GUILayout.EndHorizontal();
             }
-            else if (isDrawPending && isHumanVsAI)
+            else if (isDrawPending)
             {
-                // Show status when human offered draw and waiting for AI response
-                PieceColor offeringPlayer = GameEndDetectionManager.Instance.GetDrawOfferingPlayer();
-                PieceColor humanPlayer = GetHumanPlayerColor();
-                
-                if (offeringPlayer == humanPlayer)
-                {
-                    // Add visual separator
-                    GUILayout.Box("", GUILayout.Height(2), GUILayout.ExpandWidth(true));
-                    GUILayout.Space(5);
-                    
-                    GUILayout.Label("⏳ Draw offer pending", humanDrawOfferStyle);
-                    GUILayout.Label("Waiting for AI response...", infoStyle);
-                    
-                    // Show how long the offer has been pending
-                    if (GameEndDetectionManager.Instance != null)
-                    {
-                        float offerAge = GameEndDetectionManager.Instance.GetDrawOfferAge();
-                        GUILayout.Label($"Offered {offerAge:F0} seconds ago", infoStyle);
-                    }
-                    
-                    GUILayout.Space(3);
-                    GUILayout.Box("", GUILayout.Height(2), GUILayout.ExpandWidth(true));
-                    GUILayout.Space(5);
-                }
+                // Draw pending but can't respond - show disabled button
+                GUI.enabled = false;
+                GUILayout.Button("⏳ Draw Pending...", buttonStyle, GUILayout.Height(40));
+                GUI.enabled = true;
             }
             else if (canOfferDraw)
             {
@@ -491,7 +432,22 @@ public class GameMenuUI : MonoBehaviour
                     HandleDrawOffer();
                 }
             }
-            
+            else
+            {
+                // Can't offer draw right now - show disabled button to maintain layout
+                GUI.enabled = false;
+                GUILayout.Button("Offer Draw", buttonStyle, GUILayout.Height(40));
+                GUI.enabled = true;
+            }
+
+            GUILayout.Space(10);
+        }
+        else if (!gameOver)
+        {
+            // Game not over but managers not ready - show disabled placeholder
+            GUI.enabled = false;
+            GUILayout.Button("Offer Draw", buttonStyle, GUILayout.Height(40));
+            GUI.enabled = true;
             GUILayout.Space(10);
         }
         

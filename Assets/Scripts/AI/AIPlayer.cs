@@ -89,7 +89,10 @@ public class AIPlayer : MonoBehaviour
         }
         
         // Validate game state
-        if (GameStateManager.Instance == null || !GameStateManager.Instance.CanMovePieces())
+        // CRITICAL FIX: Don't check CanMovePieces() as it may still show animations in progress
+        // due to cache delays even after pieces have finished moving
+        // Instead, check the state directly and let the move execution handle animation waiting
+        if (GameStateManager.Instance == null || GameStateManager.Instance.currentState != GameState.Playing)
         {
             Debug.LogError("AIPlayer: Cannot make move - not in playing state");
             return;
@@ -186,6 +189,7 @@ public class AIPlayer : MonoBehaviour
         if (PieceTrayManager.Instance != null)
         {
             playerTray = PieceTrayManager.Instance.GetTray(playerColor);
+            Debug.Log($"🔍 AIPlayer.RequestPlacement: Using PieceTrayManager.GetTray({playerColor}) - tray instance ID: {(playerTray != null ? playerTray.GetInstanceID().ToString() : "NULL")}");
         }
         else
         {
@@ -198,9 +202,9 @@ public class AIPlayer : MonoBehaviour
             Debug.LogError($"🚨 AIPlayer: {playerColor} tray is NULL - cannot access pieces for placement");
             return;
         }
-        
+
         int availablePieces = playerTray.GetPieceCount();
-        Debug.Log($"📦 AIPlayer: {playerColor} tray has {availablePieces} pieces available for placement");
+        Debug.Log($"📦 AIPlayer: {playerColor} tray (instance {playerTray.GetInstanceID()}) has {availablePieces} pieces available for placement");
         
         if (availablePieces == 0)
         {
@@ -282,9 +286,16 @@ public class AIPlayer : MonoBehaviour
         // PERFORMANCE OPTIMIZED: Use adaptive search depth based on position complexity
         int searchDepth = GetAdaptiveSearchDepth();
         float timeLimit = 0.5f; // Hard limit to prevent 30-second delays
-        
+
+        Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: Calling FindBestMove for {playerColor} with depth={searchDepth}, timeLimit={timeLimit}");
         bestMove = minimaxEngine.FindBestMove(playerColor, searchDepth, timeLimit);
-        
+        Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: FindBestMove returned - bestMove is null: {bestMove == null}");
+
+        if (bestMove != null)
+        {
+            Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: bestMove details - piece={bestMove.piece?.pieceType}, from={bestMove.fromPosition}, to={bestMove.toPosition}, score={bestMove.evaluationScore:F2}");
+        }
+
         if (enableDebugLogging && bestMove != null)
         {
             Debug.Log($"MinimaxEngine evaluated {minimaxEngine.GetNodesEvaluated()} nodes (depth: {searchDepth})");
@@ -295,31 +306,50 @@ public class AIPlayer : MonoBehaviour
         // Ensure minimum thinking time for realism
         float thinkingTime = Time.time - thinkingStartTime;
         float remainingThinkingTime = Mathf.Max(0, thinkingTimeMin - thinkingTime);
-        
+
+        Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: {playerColor} - About to yield for {remainingThinkingTime}s (min thinking time)");
+        Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: {playerColor} - MonoBehaviour enabled={enabled}, GameObject active={gameObject != null && gameObject.activeInHierarchy}");
+
         if (remainingThinkingTime > 0)
         {
+            Debug.Log($"⏰ AIPlayer.ThinkAndMoveCoroutine: {playerColor} - BEFORE yield WaitForSeconds({remainingThinkingTime}s)");
             yield return new WaitForSeconds(remainingThinkingTime);
+            Debug.Log($"⏰ AIPlayer.ThinkAndMoveCoroutine: {playerColor} - AFTER yield WaitForSeconds - coroutine survived!");
         }
-        
+        else
+        {
+            Debug.Log($"⏰ AIPlayer.ThinkAndMoveCoroutine: {playerColor} - Skipping yield (remainingTime=0)");
+        }
+
+        Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: {playerColor} - Post-yield state check - enabled={enabled}, GameObject active={gameObject != null && gameObject.activeInHierarchy}");
+
         // Ensure we don't exceed maximum thinking time
         float totalThinkingTime = Time.time - thinkingStartTime;
         if (totalThinkingTime > thinkingTimeMax)
         {
             Debug.LogWarning($"AIPlayer: Thinking time exceeded maximum ({totalThinkingTime:F2}s > {thinkingTimeMax}s)");
         }
-        
+
+        Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: {playerColor} - Setting isThinking=false and firing OnAIThinkingFinished");
         isThinking = false;
         OnAIThinkingFinished?.Invoke(playerColor);
-        
+        Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: {playerColor} - OnAIThinkingFinished event fired successfully");
+
+        Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: About to process bestMove - is null: {bestMove == null}");
+
         if (bestMove != null)
         {
             if (enableDebugLogging)
                 Debug.Log($"🎯 AIPlayer: {playerColor} decided to move {bestMove.piece.pieceType} from {bestMove.fromPosition} to {bestMove.toPosition}");
-            
+
+            Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: Invoking OnAIMoveDecided event for {playerColor}");
             OnAIMoveDecided?.Invoke(playerColor, bestMove.fromPosition, bestMove.toPosition);
-            
+            Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: OnAIMoveDecided event invoked");
+
             // Execute the move
+            Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: Calling ExecuteMove for {playerColor}...");
             ExecuteMove(bestMove);
+            Debug.Log($"🔍 AIPlayer.ThinkAndMoveCoroutine: ExecuteMove call completed for {playerColor}");
             
             // PERFORMANCE: Clear minimax cache after move execution to prevent stale data
             if (minimaxEngine != null)
@@ -511,38 +541,65 @@ public class AIPlayer : MonoBehaviour
     /// </summary>
     private void ExecuteMove(AIMove move)
     {
+        Debug.Log($"🔍 AIPlayer.ExecuteMove: ENTRY - called with move");
+        Debug.Log($"🔍 AIPlayer.ExecuteMove: move is null: {move == null}");
+
         if (move == null || move.piece == null)
         {
-            Debug.LogError("AIPlayer: Cannot execute null move");
+            Debug.LogError($"🚨 AIPlayer.ExecuteMove: Cannot execute null move - move is null: {move == null}, piece is null: {move?.piece == null}");
             return;
         }
-        
+
+        Debug.Log($"🔍 AIPlayer.ExecuteMove: Move validation passed - piece={move.piece.pieceType}, from={move.fromPosition}, to={move.toPosition}");
+
         // Check if game is still active before executing move
-        if (GameStateManager.Instance != null && GameStateManager.Instance.currentState != GameState.Playing)
+        Debug.Log($"🔍 AIPlayer.ExecuteMove: Checking game state...");
+        if (GameStateManager.Instance != null)
         {
-            Debug.Log($"🏁 AIPlayer: Cancelling move execution - game no longer in Playing state (current: {GameStateManager.Instance.currentState})");
-            return;
-        }
-        
-        // Check if chaos animation is in progress before executing move
-        if (GameStateManager.Instance != null && !GameStateManager.Instance.CanMovePieces())
-        {
-            Debug.LogWarning($"🌪️ AIPlayer: Delaying move execution - animations in progress (chaos or piece animation)");
-            StartCoroutine(DelayedExecuteMove(move));
-            return;
-        }
-        
-        Debug.Log($"🎮 AIPlayer: Executing move {move.piece.pieceType} {move.fromPosition} → {move.toPosition}");
-        
-        // Use the existing chess board move system
-        if (ChessBoard.Instance != null)
-        {
-            ChessBoard.Instance.MovePiece(move.fromPosition, move.toPosition);
+            Debug.Log($"🔍 AIPlayer.ExecuteMove: GameStateManager.currentState = {GameStateManager.Instance.currentState}");
         }
         else
         {
-            Debug.LogError("AIPlayer: ChessBoard.Instance is null, cannot execute move");
+            Debug.LogError($"🚨 AIPlayer.ExecuteMove: GameStateManager.Instance is NULL");
         }
+
+        if (GameStateManager.Instance != null && GameStateManager.Instance.currentState != GameState.Playing)
+        {
+            Debug.Log($"🏁 AIPlayer.ExecuteMove: ABORTING - game no longer in Playing state (current: {GameStateManager.Instance.currentState})");
+            return;
+        }
+
+        Debug.Log($"🔍 AIPlayer.ExecuteMove: Game state check passed - in Playing state");
+
+        // Check if chaos animation is in progress before executing move
+        Debug.Log($"🔍 AIPlayer.ExecuteMove: Checking if pieces can move (CanMovePieces)...");
+        bool canMovePieces = GameStateManager.Instance != null && GameStateManager.Instance.CanMovePieces();
+        Debug.Log($"🔍 AIPlayer.ExecuteMove: CanMovePieces = {canMovePieces}");
+
+        if (GameStateManager.Instance != null && !GameStateManager.Instance.CanMovePieces())
+        {
+            Debug.LogWarning($"🌪️ AIPlayer.ExecuteMove: DELAYING - animations in progress, starting DelayedExecuteMove coroutine");
+            StartCoroutine(DelayedExecuteMove(move));
+            return;
+        }
+
+        Debug.Log($"🔍 AIPlayer.ExecuteMove: All validations passed - ready to execute move");
+        Debug.Log($"🎮 AIPlayer.ExecuteMove: Executing move {move.piece.pieceType} {move.fromPosition} → {move.toPosition}");
+
+        // Use the existing chess board move system
+        Debug.Log($"🔍 AIPlayer.ExecuteMove: Checking ChessBoard.Instance...");
+        if (ChessBoard.Instance != null)
+        {
+            Debug.Log($"🔍 AIPlayer.ExecuteMove: ChessBoard.Instance exists, calling MovePiece({move.fromPosition}, {move.toPosition})...");
+            ChessBoard.Instance.MovePiece(move.fromPosition, move.toPosition);
+            Debug.Log($"✅ AIPlayer.ExecuteMove: MovePiece call completed successfully");
+        }
+        else
+        {
+            Debug.LogError($"🚨 AIPlayer.ExecuteMove: ChessBoard.Instance is NULL - cannot execute move");
+        }
+
+        Debug.Log($"🔍 AIPlayer.ExecuteMove: EXIT");
     }
     
     /// <summary>
@@ -1020,12 +1077,23 @@ public class AIPlayer : MonoBehaviour
     private void OnGameStateChanged(GameState newState)
     {
         Debug.Log($"🔄 AIPlayer: Game state changed to {newState}");
-        
-        // If game is no longer in playing state, stop all AI operations
-        if (newState != GameState.Playing)
+
+        // CACHE CLEARING: When transitioning to Playing state, clear minimax cache to prevent stale placement data
+        if (newState == GameState.Playing)
+        {
+            Debug.Log("🧹 AIPlayer: Entering Playing state - clearing minimax cache to prevent stale data");
+            if (minimaxEngine != null)
+            {
+                minimaxEngine.ClearCache();
+                Debug.Log("✅ AIPlayer: Minimax cache cleared successfully");
+            }
+        }
+
+        // Only stop AI operations when game truly ends (not during placement phase or active play)
+        if (newState == GameState.GameOver || newState == GameState.WaitingForConfiguration)
         {
             Debug.Log("🏁 AIPlayer: Game ended - stopping all AI operations");
-            
+
             // Stop current thinking coroutine if active
             if (currentThinkingCoroutine != null)
             {
@@ -1033,11 +1101,11 @@ public class AIPlayer : MonoBehaviour
                 currentThinkingCoroutine = null;
                 Debug.Log("🚫 AIPlayer: Stopped thinking coroutine");
             }
-            
+
             // Reset AI state
             isThinking = false;
             isPlacing = false;
-            
+
             // Clear placement queue
             placementQueue.Clear();
             Debug.Log("🧹 AIPlayer: Cleared placement queue and reset AI state");

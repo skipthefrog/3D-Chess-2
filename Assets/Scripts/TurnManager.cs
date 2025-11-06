@@ -37,7 +37,7 @@ public class TurnManager : MonoBehaviour
     private const int REPETITION_DRAW_THRESHOLD = 3; // 3-fold repetition = draw
     
     [Header("Events")]
-    public System.Action<PieceColor> OnTurnChanged;
+    public System.Action<PieceColor, PieceColor> OnTurnChanged; // (previousPlayer, newCurrentPlayer)
     public System.Action<PieceColor, PieceColor> OnInvalidTurnAttempt; // attempted player, current player
     public System.Action<PieceColor> OnPlayerInCheck;
     public System.Action<PieceColor> OnCheckResolved;
@@ -239,27 +239,34 @@ public class TurnManager : MonoBehaviour
     /// </summary>
     public void NextTurn()
     {
+        Debug.Log($"🔍 TurnManager.NextTurn: CALLED - currentPlayer before switch: {currentPlayer}");
+
         // Only switch turns during active gameplay
-        if (GameStateManager.Instance == null || !GameStateManager.Instance.CanMovePieces())
+        // CRITICAL FIX: Don't check CanMovePieces() here as it checks for animations
+        // We need to allow turn switching even while pieces are animating
+        // The deferred AI move logic below handles waiting for animations to complete
+        if (GameStateManager.Instance == null || GameStateManager.Instance.currentState != GameState.Playing)
         {
             Debug.LogWarning($"TurnManager: Cannot switch turns - not in playing state ({GameStateManager.Instance?.currentState})");
             return;
         }
-        
+
         PieceColor previousPlayer = currentPlayer;
 
         // Use PlayerManager for scalable turn cycling (supports 2-6 players)
         if (PlayerManager.Instance != null)
         {
             currentPlayer = PlayerManager.Instance.GetNextPlayer(currentPlayer);
+            Debug.Log($"🔍 TurnManager.NextTurn: PlayerManager returned next player: {currentPlayer}");
         }
         else
         {
             // Fallback to binary toggle for 2-player games if PlayerManager unavailable
             Debug.LogWarning("TurnManager.NextTurn: PlayerManager not available, using fallback 2-player toggle");
             currentPlayer = (currentPlayer == PieceColor.White) ? PieceColor.Black : PieceColor.White;
+            Debug.Log($"🔍 TurnManager.NextTurn: Fallback toggle to: {currentPlayer}");
         }
-        
+
         // Track moves for opening protection
         totalMovesMade++;
         if (isFirstTurnAfterPlacement && totalMovesMade >= 2)
@@ -267,22 +274,27 @@ public class TurnManager : MonoBehaviour
             isFirstTurnAfterPlacement = false;
             Debug.Log("TurnManager: Opening move protection disabled - king captures now allowed");
         }
-        
+
         // ANTI-REPETITION: Record current board position after the move
         RecordCurrentPosition();
-        
+
         // CHAOS MODE: Trigger chaos rotation if enabled
         if (ChaosRotationManager.Instance != null)
         {
             ChaosRotationManager.Instance.OnMoveCompleted(previousPlayer);
         }
-        
+
         Debug.Log($"🔄 TurnManager: Turn switched from {previousPlayer} to {currentPlayer}");
         Debug.Log($"🔄 TurnManager: Player types - White: {whitePlayerType}, Black: {blackPlayerType}");
-        Debug.Log($"🔄 TurnManager: Current player {currentPlayer} is AI: {IsCurrentPlayerAI()}");
-        
-        OnTurnChanged?.Invoke(currentPlayer);
-        
+
+        // DIAGNOSTIC: Check player type determination
+        PlayerType currentPlayerType = GetPlayerType(currentPlayer);
+        Debug.Log($"🔍 TurnManager.NextTurn: GetPlayerType({currentPlayer}) returned: {currentPlayerType}");
+        Debug.Log($"🔍 TurnManager.NextTurn: IsCurrentPlayerAI() = {IsCurrentPlayerAI()}");
+
+        OnTurnChanged?.Invoke(previousPlayer, currentPlayer);
+        Debug.Log($"🔍 TurnManager.NextTurn: OnTurnChanged event invoked - previousPlayer: {previousPlayer}, currentPlayer: {currentPlayer}");
+
         // Handle timer switching for timed play mode
         if (TimerManager.Instance != null && TimerManager.Instance.IsTimedPlayActive())
         {
@@ -290,23 +302,29 @@ public class TurnManager : MonoBehaviour
             TimerManager.Instance.StartTimer(currentPlayer); // Start current player's timer
             Debug.Log($"⏰ TurnManager: Timer switched to {currentPlayer}");
         }
-        
+
         // If the new current player is AI, check for animations before triggering their move
         if (IsCurrentPlayerAI())
         {
             Debug.Log($"🔄 TurnManager: Current player {currentPlayer} is AI");
-            
+            Debug.Log($"🔍 TurnManager.NextTurn: Checking for animating pieces...");
+
             // Check if any pieces are still animating from the previous move
-            if (AnyPiecesStillAnimating())
+            bool piecesAnimating = AnyPiecesStillAnimating();
+            Debug.Log($"🔍 TurnManager.NextTurn: AnyPiecesStillAnimating() returned: {piecesAnimating}");
+
+            if (piecesAnimating)
             {
                 Debug.Log($"🎬 TurnManager: Pieces still animating, deferring AI move for {currentPlayer}");
                 isWaitingForAnimationCompletion = true;
                 pendingAIPlayer = currentPlayer;
+                Debug.Log($"🔍 TurnManager.NextTurn: Set pendingAIPlayer = {pendingAIPlayer}");
                 SubscribeToAnimationCompletion();
             }
             else
             {
                 Debug.Log($"🔄 TurnManager: No animations active, triggering immediate AI move for {currentPlayer}");
+                Debug.Log($"🔍 TurnManager.NextTurn: About to call TriggerAIMove()...");
                 TriggerAIMove();
             }
         }
@@ -314,9 +332,11 @@ public class TurnManager : MonoBehaviour
         {
             Debug.Log($"🔄 TurnManager: Current player {currentPlayer} is HUMAN, NOT triggering AI move");
         }
-        
+
         // Check if the current player (human or AI) needs to respond to a pending draw offer
         CheckForPendingAIDrawResponse();
+
+        Debug.Log($"🔍 TurnManager.NextTurn: COMPLETED - currentPlayer is now {currentPlayer}");
     }
     
     /// <summary>
@@ -330,8 +350,8 @@ public class TurnManager : MonoBehaviour
         Debug.Log($"TurnManager: Current player manually set from {previousPlayer} to {currentPlayer}");
         Debug.Log($"TurnManager: Player types - White: {whitePlayerType}, Black: {blackPlayerType}");
         Debug.Log($"TurnManager: Current player {currentPlayer} is AI: {IsCurrentPlayerAI()}");
-        
-        OnTurnChanged?.Invoke(currentPlayer);
+
+        OnTurnChanged?.Invoke(previousPlayer, currentPlayer);
         
         // Handle timer switching if timed play is active
         if (TimerManager.Instance != null && TimerManager.Instance.IsTimedPlayActive())
@@ -575,23 +595,33 @@ public class TurnManager : MonoBehaviour
     /// </summary>
     public PlayerType GetPlayerType(PieceColor color)
     {
+        Debug.Log($"🔍 TurnManager.GetPlayerType: Called for {color}");
+
         // Use PlayerManager for scalable player type retrieval
         if (PlayerManager.Instance != null)
         {
-            return PlayerManager.Instance.GetPlayerType(color);
+            PlayerType result = PlayerManager.Instance.GetPlayerType(color);
+            Debug.Log($"🔍 TurnManager.GetPlayerType: PlayerManager returned {result} for {color}");
+            return result;
         }
 
         // Fallback for 2-player games
         Debug.LogWarning("TurnManager.GetPlayerType: PlayerManager not available, using fallback");
-        return color == PieceColor.White ? whitePlayerType : blackPlayerType;
+        PlayerType fallbackResult = color == PieceColor.White ? whitePlayerType : blackPlayerType;
+        Debug.Log($"🔍 TurnManager.GetPlayerType: Fallback returned {fallbackResult} for {color}");
+        return fallbackResult;
     }
-    
+
     /// <summary>
     /// Check if the current player is an AI
     /// </summary>
     public bool IsCurrentPlayerAI()
     {
-        return GetPlayerType(currentPlayer) == PlayerType.Computer;
+        Debug.Log($"🔍 TurnManager.IsCurrentPlayerAI: Called for currentPlayer={currentPlayer}");
+        PlayerType playerType = GetPlayerType(currentPlayer);
+        bool isAI = playerType == PlayerType.Computer;
+        Debug.Log($"🔍 TurnManager.IsCurrentPlayerAI: {currentPlayer} type is {playerType}, isAI={isAI}");
+        return isAI;
     }
     
     /// <summary>
@@ -756,8 +786,9 @@ public class TurnManager : MonoBehaviour
                 if (currentPlayer != PieceColor.Black)
                 {
                     Debug.Log($"🔄 TurnManager.ValidateTurnOrder: Black in check should move first - correcting currentPlayer from {currentPlayer} to Black");
+                    PieceColor prev = currentPlayer;
                     currentPlayer = PieceColor.Black;
-                    OnTurnChanged?.Invoke(currentPlayer);
+                    OnTurnChanged?.Invoke(prev, currentPlayer);
                 }
             }
             else if (whiteInCheck && !blackInCheck)
@@ -766,8 +797,9 @@ public class TurnManager : MonoBehaviour
                 if (currentPlayer != PieceColor.White)
                 {
                     Debug.Log($"🔄 TurnManager.ValidateTurnOrder: White in check should move first - correcting currentPlayer from {currentPlayer} to White");
+                    PieceColor prev = currentPlayer;
                     currentPlayer = PieceColor.White;
-                    OnTurnChanged?.Invoke(currentPlayer);
+                    OnTurnChanged?.Invoke(prev, currentPlayer);
                 }
             }
         }
@@ -781,45 +813,75 @@ public class TurnManager : MonoBehaviour
     /// </summary>
     private void TriggerAIMove()
     {
+        Debug.Log($"🔍 TurnManager.TriggerAIMove: CALLED for currentPlayer={currentPlayer}");
+
         // CRITICAL VALIDATION: Ensure proper turn order before any AI moves
-        if (!ValidateTurnOrder())
+        Debug.Log($"🔍 TurnManager.TriggerAIMove: Validating turn order...");
+        bool turnOrderValid = ValidateTurnOrder();
+        Debug.Log($"🔍 TurnManager.TriggerAIMove: ValidateTurnOrder() returned: {turnOrderValid}");
+
+        if (!turnOrderValid)
         {
             Debug.LogError("🚨 TurnManager: BLOCKED AI move due to invalid turn order!");
             return;
         }
-        
+
         // Enhanced validation to prevent AI from triggering for human players
         PlayerType currentPlayerType = GetPlayerType(currentPlayer);
         bool shouldTriggerAI = IsCurrentPlayerAI();
-        
+
         Debug.Log($"🎯 TurnManager.TriggerAIMove: Current player {currentPlayer}, PlayerType: {currentPlayerType}, ShouldTriggerAI: {shouldTriggerAI}");
-        
+        Debug.Log($"🔍 TurnManager.TriggerAIMove: PlayerManager.Instance exists: {PlayerManager.Instance != null}");
+
+        if (PlayerManager.Instance != null)
+        {
+            PlayerType pmType = PlayerManager.Instance.GetPlayerType(currentPlayer);
+            Debug.Log($"🔍 TurnManager.TriggerAIMove: PlayerManager.GetPlayerType({currentPlayer}) = {pmType}");
+        }
+        else
+        {
+            Debug.LogWarning($"🔍 TurnManager.TriggerAIMove: PlayerManager.Instance is NULL, using deprecated fields");
+            Debug.Log($"🔍 TurnManager.TriggerAIMove: whitePlayerType={whitePlayerType}, blackPlayerType={blackPlayerType}");
+        }
+
         if (!shouldTriggerAI)
         {
             Debug.LogError($"🚨 TurnManager: BLOCKED AI trigger for HUMAN player {currentPlayer} (type: {currentPlayerType})");
             Debug.LogError($"🚨 TurnManager: whitePlayerType={whitePlayerType}, blackPlayerType={blackPlayerType}");
             return;
         }
-        
+
         // Double-check game state - use immediate check to avoid cache delays
-        if (GameStateManager.Instance == null || !GameStateManager.Instance.CanMovePiecesImmediate())
+        Debug.Log($"🔍 TurnManager.TriggerAIMove: Checking game state...");
+        bool gameStateValid = GameStateManager.Instance != null && GameStateManager.Instance.CanMovePiecesImmediate();
+        Debug.Log($"🔍 TurnManager.TriggerAIMove: GameStateManager exists: {GameStateManager.Instance != null}");
+        Debug.Log($"🔍 TurnManager.TriggerAIMove: CanMovePiecesImmediate: {GameStateManager.Instance?.CanMovePiecesImmediate()}");
+        Debug.Log($"🔍 TurnManager.TriggerAIMove: Game state valid: {gameStateValid}");
+
+        if (!gameStateValid)
         {
             Debug.LogError($"🚨 TurnManager: Cannot trigger AI move - invalid game state: {GameStateManager.Instance?.currentState}");
             Debug.LogError($"🚨 TurnManager: Animation state check - Chaos: {ChaosRotationManager.Instance?.IsChaosAnimationInProgress()}, Pieces: {AnyPiecesStillAnimating()}");
             return;
         }
-        
+
         Debug.Log($"🎯 TurnManager: Triggering AI move for {currentPlayer} (validated as AI player)");
-        
+        Debug.Log($"🔍 TurnManager.TriggerAIMove: Checking AIPlayer.Instance...");
+        Debug.Log($"🔍 TurnManager.TriggerAIMove: AIPlayer.Instance exists: {AIPlayer.Instance != null}");
+
         // Request move from AI player
         if (AIPlayer.Instance != null)
         {
+            Debug.Log($"🔍 TurnManager.TriggerAIMove: Calling AIPlayer.Instance.RequestMove({currentPlayer})...");
             AIPlayer.Instance.RequestMove(currentPlayer);
+            Debug.Log($"🔍 TurnManager.TriggerAIMove: AIPlayer.Instance.RequestMove() call completed");
         }
         else
         {
             Debug.LogError("TurnManager: AIPlayer.Instance is null, cannot trigger AI move");
         }
+
+        Debug.Log($"🔍 TurnManager.TriggerAIMove: COMPLETED");
     }
     
     /// <summary>
@@ -849,63 +911,138 @@ public class TurnManager : MonoBehaviour
     /// <summary>
     /// Set the initial check states from post-placement evaluation
     /// Called by PlacementManager after all pieces are placed
+    /// MULTI-PLAYER SUPPORT: Accepts check states for all active players (2-6 players)
     /// </summary>
-    public void SetInitialCheckStates(bool whiteInCheck, bool blackInCheck)
+    public void SetInitialCheckStates(System.Collections.Generic.Dictionary<PieceColor, bool> playerCheckStates)
     {
-        initialWhiteInCheck = whiteInCheck;
-        initialBlackInCheck = blackInCheck;
-        bothPlayersStartInCheck = whiteInCheck && blackInCheck;
-        
-        Debug.Log($"🔄 TurnManager: Initial check states set - White: {whiteInCheck}, Black: {blackInCheck}, Both: {bothPlayersStartInCheck}");
-        
+        // Clear previous check states
+        initialWhiteInCheck = false;
+        initialBlackInCheck = false;
+        bothPlayersStartInCheck = false;
+
+        // Extract White and Black check states for backwards compatibility
+        if (playerCheckStates.ContainsKey(PieceColor.White))
+        {
+            initialWhiteInCheck = playerCheckStates[PieceColor.White];
+        }
+
+        if (playerCheckStates.ContainsKey(PieceColor.Black))
+        {
+            initialBlackInCheck = playerCheckStates[PieceColor.Black];
+        }
+
+        // For 2-player games, check if both players start in check
+        if (playerCheckStates.Count == 2 && playerCheckStates.ContainsKey(PieceColor.White) && playerCheckStates.ContainsKey(PieceColor.Black))
+        {
+            bothPlayersStartInCheck = initialWhiteInCheck && initialBlackInCheck;
+        }
+
+        // Log all player check states
+        Debug.Log($"🔄 TurnManager: Initial check states set for {playerCheckStates.Count} players:");
+        foreach (var kvp in playerCheckStates)
+        {
+            Debug.Log($"🔄   {kvp.Key}: {(kvp.Value ? "IN CHECK" : "safe")}");
+        }
+
+        if (bothPlayersStartInCheck)
+        {
+            Debug.Log("🔄 ⚠️ TurnManager: Both White and Black start in check - king capture protection active");
+        }
+
         // Determine opening turn order based on check states
         DetermineOpeningTurnOrder();
+    }
+
+    /// <summary>
+    /// Set the initial check states from post-placement evaluation (legacy 2-player version)
+    /// DEPRECATED: Use SetInitialCheckStates(Dictionary) for multi-player support
+    /// Maintained for backwards compatibility with 2-player games
+    /// </summary>
+    [System.Obsolete("Use SetInitialCheckStates(Dictionary<PieceColor, bool>) for multi-player support")]
+    public void SetInitialCheckStates(bool whiteInCheck, bool blackInCheck)
+    {
+        // Convert to dictionary format and call new version
+        var checkStates = new System.Collections.Generic.Dictionary<PieceColor, bool>
+        {
+            { PieceColor.White, whiteInCheck },
+            { PieceColor.Black, blackInCheck }
+        };
+
+        SetInitialCheckStates(checkStates);
     }
     
     /// <summary>
     /// Determine who should take the first turn based on initial check states
-    /// CRITICAL: Ensures White always moves first in standard games
+    /// MULTI-PLAYER SUPPORT: For 2-player games, uses White/Black check states. For multi-player, defaults to first player in rotation.
     /// </summary>
     private void DetermineOpeningTurnOrder()
     {
         PieceColor previousPlayer = currentPlayer;
         PieceColor startingPlayer;
         string reason;
-        
+
         Debug.Log($"🔄 TurnManager: DetermineOpeningTurnOrder - Initial check states: White={initialWhiteInCheck}, Black={initialBlackInCheck}");
-        
-        if (!initialWhiteInCheck && !initialBlackInCheck)
+
+        // MULTI-PLAYER FIX: Get all active players from PlayerManager
+        System.Collections.Generic.List<PieceColor> activePlayers = new System.Collections.Generic.List<PieceColor>();
+        if (PlayerManager.Instance != null)
         {
-            // Neither in check - ALWAYS White starts (standard chess rule)
-            startingPlayer = PieceColor.White;
-            reason = "standard opening (neither player in check) - White moves first";
-        }
-        else if (initialWhiteInCheck && !initialBlackInCheck)
-        {
-            // White only in check - White must get out of check first
-            startingPlayer = PieceColor.White;
-            reason = "White in check and must resolve it";
-        }
-        else if (!initialWhiteInCheck && initialBlackInCheck)
-        {
-            // Black only in check - Black gets first turn to resolve check
-            startingPlayer = PieceColor.Black;
-            reason = "Black in check and gets first turn to resolve it";
+            activePlayers = PlayerManager.Instance.GetActivePlayers();
+            Debug.Log($"🔄 TurnManager: PlayerManager found {activePlayers.Count} active players");
         }
         else
         {
-            // Both in check - White starts but cannot capture king
-            startingPlayer = PieceColor.White;
-            reason = "both players in check (White starts but cannot capture king)";
+            // Fallback to 2-player mode
+            activePlayers.Add(PieceColor.White);
+            activePlayers.Add(PieceColor.Black);
+            Debug.Log($"🔄 TurnManager: PlayerManager not available, using 2-player fallback");
         }
-        
+
+        // For 2-player games, use the original White/Black check-based logic
+        if (activePlayers.Count == 2 && activePlayers.Contains(PieceColor.White) && activePlayers.Contains(PieceColor.Black))
+        {
+            Debug.Log("🔄 TurnManager: Using 2-player turn order logic based on check states");
+
+            if (!initialWhiteInCheck && !initialBlackInCheck)
+            {
+                // Neither in check - ALWAYS White starts (standard chess rule)
+                startingPlayer = PieceColor.White;
+                reason = "standard opening (neither player in check) - White moves first";
+            }
+            else if (initialWhiteInCheck && !initialBlackInCheck)
+            {
+                // White only in check - White must get out of check first
+                startingPlayer = PieceColor.White;
+                reason = "White in check and must resolve it";
+            }
+            else if (!initialWhiteInCheck && initialBlackInCheck)
+            {
+                // Black only in check - Black gets first turn to resolve check
+                startingPlayer = PieceColor.Black;
+                reason = "Black in check and gets first turn to resolve it";
+            }
+            else
+            {
+                // Both in check - White starts but cannot capture king
+                startingPlayer = PieceColor.White;
+                reason = "both players in check (White starts but cannot capture king)";
+            }
+        }
+        else
+        {
+            // MULTI-PLAYER: Use first player in rotation order (typically White for 4/6-player games)
+            startingPlayer = activePlayers[0];
+            reason = $"multi-player game - first player in rotation ({activePlayers.Count} players total)";
+            Debug.Log($"🔄 TurnManager: Multi-player mode - {activePlayers.Count} players, first is {startingPlayer}");
+        }
+
         Debug.Log($"🔄 TurnManager: Opening turn order determined - {startingPlayer} starts first ({reason})");
         Debug.Log($"🔄 TurnManager: Player type check - {startingPlayer} is AI: {IsPlayerAI(startingPlayer)}");
-        
+
         // CRITICAL FIX: Set the current player and validate
         PieceColor oldCurrentPlayer = currentPlayer;
         currentPlayer = startingPlayer;
-        
+
         // Validation logging
         if (oldCurrentPlayer != currentPlayer)
         {
@@ -915,23 +1052,23 @@ public class TurnManager : MonoBehaviour
         {
             Debug.Log($"🔄 TurnManager: Current player confirmed as {currentPlayer}");
         }
-        
+
         // Log special conditions
         if (bothPlayersStartInCheck)
         {
             Debug.Log("🔄 ⚠️ TurnManager: SPECIAL CONDITION - Both players start in check, king capture protection active");
         }
-        
+
         if (initialWhiteInCheck)
         {
             Debug.Log("🔄 ⚠️ TurnManager: White must resolve check before ending turn");
         }
-        
+
         if (initialBlackInCheck)
         {
             Debug.Log("🔄 ⚠️ TurnManager: Black must resolve check before ending turn");
         }
-        
+
         // Final validation
         Debug.Log($"🔄 TurnManager: Turn order establishment COMPLETE - Starting player: {currentPlayer}");
     }

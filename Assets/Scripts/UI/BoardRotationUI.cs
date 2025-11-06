@@ -5,7 +5,7 @@ public class BoardRotationUI : MonoBehaviour
     [Header("UI Settings")]
     public float buttonSize = 60f;
     public float screenEdgeOffset = 20f;
-    public bool showRotationButtons = true;
+    public bool showRotationButtons = false; // Disabled by default - users can use Q/E keyboard shortcuts instead
     public bool showRotationStatus = false; // Hide status display to make room for check status
     
     [Header("Colors")]
