@@ -14,6 +14,11 @@ const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
 
+// Import new modules
+const Database = require('./database');
+const FriendSystem = require('./friendSystem');
+const MatchmakingSystem = require('./matchmaking');
+
 // Configuration
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -135,6 +140,122 @@ app.get('/api/server/status', (req, res) => {
     totalPlayers: gameServer.players.size,
     activeGames: Array.from(gameServer.rooms.values()).filter(r => r.gameState.phase === 'playing').length,
     timestamp: new Date().toISOString()
+  });
+});
+
+// ============ LOBBY API ENDPOINTS ============
+
+// Get public rooms (lobby browser)
+app.get('/api/lobby/rooms', (req, res) => {
+  const { playerCount, boardSize, hasOpenSlots } = req.query;
+
+  let rooms = Array.from(gameServer.rooms.values())
+    .filter(room => {
+      // Only show public rooms that are joinable
+      if (!room.settings?.isPublic) return false;
+      if (room.gameState.phase !== 'waiting') return false;
+
+      const activePlayers = Array.from(room.players.values()).filter(p => !p.isDisconnected);
+      if (activePlayers.length >= room.maxPlayers) return false;
+
+      return true;
+    })
+    .map(room => {
+      const activePlayers = Array.from(room.players.values()).filter(p => !p.isDisconnected);
+
+      return {
+        roomCode: room.roomCode,
+        hostName: activePlayers.find(p => p.isHost)?.playerName || 'Unknown',
+        playerCount: activePlayers.length,
+        maxPlayers: room.maxPlayers,
+        openSlots: room.maxPlayers - activePlayers.length,
+        boardSize: room.gameState.boardSize || 8,
+        chaosMode: room.gameState.chaosMode || false,
+        timedPlay: room.gameState.timedPlay || false,
+        createdAt: room.createdAt,
+        players: activePlayers.map(p => ({
+          name: p.playerName,
+          color: p.assignedColor
+        }))
+      };
+    });
+
+  // Apply filters
+  if (playerCount) {
+    rooms = rooms.filter(r => r.maxPlayers === parseInt(playerCount));
+  }
+  if (boardSize) {
+    rooms = rooms.filter(r => r.boardSize === parseInt(boardSize));
+  }
+  if (hasOpenSlots === 'true') {
+    rooms = rooms.filter(r => r.openSlots > 0);
+  }
+
+  // Sort by creation time (newest first)
+  rooms.sort((a, b) => b.createdAt - a.createdAt);
+
+  res.json({
+    success: true,
+    totalRooms: rooms.length,
+    rooms: rooms
+  });
+});
+
+// ============ MATCHMAKING API ENDPOINTS ============
+
+// Get matchmaking queue status
+app.get('/api/matchmaking/status', (req, res) => {
+  const status = matchmakingSystem.getQueueStatus();
+  res.json({
+    success: true,
+    ...status
+  });
+});
+
+// ============ FRIEND SYSTEM API ENDPOINTS ============
+
+// Search for users (for adding friends)
+app.get('/api/friends/search', (req, res) => {
+  const { query, userId } = req.query;
+
+  if (!query || !userId) {
+    return res.status(400).json({
+      success: false,
+      error: 'query and userId are required'
+    });
+  }
+
+  const results = friendSystem.searchUsers(query, userId, 20);
+  res.json({
+    success: true,
+    results: results
+  });
+});
+
+// Get user profile
+app.get('/api/users/:userId', (req, res) => {
+  const user = database.getUser(req.params.userId);
+
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      error: 'User not found'
+    });
+  }
+
+  res.json({
+    success: true,
+    user: {
+      userId: user.userId,
+      username: user.username,
+      gamesPlayed: user.gamesPlayed,
+      wins: user.wins,
+      losses: user.losses,
+      draws: user.draws,
+      createdAt: user.createdAt,
+      lastSeen: user.lastSeen,
+      isOnline: friendSystem.isUserOnline(user.userId)
+    }
   });
 });
 
@@ -1115,6 +1236,13 @@ class GameServer {
 // Initialize game server
 const gameServer = new GameServer();
 
+// Initialize new systems
+const database = new Database('./data');
+const friendSystem = new FriendSystem(database, io);
+const matchmakingSystem = new MatchmakingSystem(gameServer, io);
+
+logger.info('✅ All systems initialized: Database, Friends, Matchmaking');
+
 // Enhanced authentication middleware with Unity detection
 io.use((socket, next) => {
   const handshake = socket.handshake;
@@ -1199,6 +1327,21 @@ io.on('connection', (socket) => {
     currentRoom: null,
     connectedAt: new Date()
   });
+
+  // Get or create user in database
+  const user = database.getOrCreateUser(socket.playerName, socket.playerId);
+  socket.userId = user.userId;
+
+  // Register with friend system
+  friendSystem.registerOnlineUser(socket.id, user.userId);
+
+  // Setup friend system socket handlers
+  friendSystem.setupSocketHandlers(socket, user.userId);
+
+  // Setup matchmaking socket handlers
+  matchmakingSystem.setupSocketHandlers(socket, user.userId);
+
+  logger.info(`👤 User registered: ${socket.playerName} (ID: ${user.userId})`);
 
   // Check for reconnection attempt
   const existingPlayer = gameServer.players.get(socket.playerId);
@@ -1700,6 +1843,14 @@ io.on('connection', (socket) => {
   socket.on('disconnect', (reason) => {
     const player = gameServer.players.get(socket.playerId);
     logger.info(`🔌 Player disconnected: ${socket.playerName} (${reason}) from ${socket.handshake.address}`);
+
+    // Unregister from friend system
+    friendSystem.unregisterOnlineUser(socket.id);
+
+    // Update last seen in database
+    if (socket.userId) {
+      database.updateLastSeen(socket.userId);
+    }
     
     if (player && player.currentRoom) {
       // Distinguish between different disconnect reasons

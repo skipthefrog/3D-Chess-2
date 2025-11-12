@@ -1,30 +1,15 @@
-// Try to import Socket.IO packages and detect which one is available
-#if UNITY_EDITOR || !UNITY_WEBGL
-    // For desktop/editor builds, try to use Socket.IO Unity
-    #if SOCKETIO_UNITY_AVAILABLE
-        #define USE_SOCKETIO_UNITY
-    #elif BESTHTTP_AVAILABLE
-        #define USE_BESTHTTP_SOCKETIO
-    #else
-        // No Socket.IO package detected, use simulation mode
-        #define USE_SIMULATION_MODE
-    #endif
-#else
-    // For WebGL builds, we need WebGL-compatible networking
-    #define USE_WEBGL_SOCKETS
-#endif
+/**
+ * NetworkManager for 3D Chess Online Multiplayer
+ * Uses native SocketIOClient for cross-platform support
+ * Supports: Windows, Mac, Linux, iOS, Android, WebGL
+ */
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using ChessNetwork;
-
-#if USE_SOCKETIO_UNITY
-    using SocketIOUnity;
-#elif USE_BESTHTTP_SOCKETIO
-    using BestHTTP.SocketIO;
-#endif
 
 /// <summary>
 /// Manages network communication for online multiplayer chess games.
@@ -55,22 +40,8 @@ public class NetworkManager : MonoBehaviour
     public PieceColor AssignedColor { get; private set; } = PieceColor.White;
     public ConnectionStatus CurrentConnectionStatus { get; private set; }
     
-    // Socket connection (will be initialized based on available package)
-#if USE_SOCKETIO_UNITY
-    private SocketIOUnity socket;
-#elif USE_BESTHTTP_SOCKETIO
-    private SocketManager socket;
-#elif USE_WEBGL_SOCKETS
-    // WebGL socket implementation placeholder
-    private object socket;
-#else
-    // Simulation mode - no real socket
-    private object socket;
-#endif
-    
-    // Package detection
-    private bool hasSocketIOPackage = false;
-    private string detectedPackage = "None";
+    // Native Socket.IO client (works on all platforms)
+    private SocketIOClient socket;
     
     // Game state
     private NetworkGameState lastGameState;
@@ -184,17 +155,13 @@ public class NetworkManager : MonoBehaviour
             status = "disconnected"
         };
         
-        // Detect available Socket.IO package
-        DetectSocketIOPackage();
-        
-        // Initialize socket based on detected package
-        InitializeSocket();
-        
+        // Initialize native Socket.IO client
+        socket = new SocketIOClient(this);
+
         if (enableDebugLogging)
         {
-            Debug.Log($"🌐 NetworkManager: Networking initialized for {actualServerUrl}");
-            Debug.Log($"🔍 Detected package: {detectedPackage}");
-            Debug.Log($"📦 Socket.IO available: {hasSocketIOPackage}");
+            Debug.Log($"🌐 NetworkManager: Native Socket.IO client initialized for {actualServerUrl}");
+            Debug.Log($"✅ Cross-platform support: Windows, Mac, Linux, iOS, Android, WebGL");
         }
     }
     
@@ -430,19 +397,28 @@ public class NetworkManager : MonoBehaviour
             Debug.Log($"🌐 NetworkManager: Connecting to server at {currentServerUrl}");
         
         UpdateConnectionStatus("connecting");
-        
-        if (hasSocketIOPackage)
-        {
-            // Attempt real Socket.IO connection
-            ConnectToSocketIOServer();
-        }
-        else
-        {
-            // Fall back to simulation mode
-            if (enableDebugLogging)
-                Debug.LogWarning("🔄 No Socket.IO package detected - using simulation mode");
-            StartCoroutine(SimulateConnection());
-        }
+
+        // Connect using native Socket.IO client
+        socket.Connect(
+            currentServerUrl,
+            "UNITY",
+            onSuccess: () => {
+                IsConnected = true;
+                UpdateConnectionStatus("connected");
+                SetupSocketEventHandlers();
+                OnConnectionStateChanged?.Invoke(true);
+
+                if (enableDebugLogging)
+                    Debug.Log($"✅ Connected to server successfully! Socket ID: {socket.SocketId}");
+            },
+            onFail: (error) => {
+                IsConnected = false;
+                UpdateConnectionStatus("error");
+                OnConnectionError?.Invoke(error);
+
+                Debug.LogError($"❌ Connection failed: {error}");
+            }
+        );
     }
     
     /// <summary>
@@ -451,20 +427,331 @@ public class NetworkManager : MonoBehaviour
     public void DisconnectFromServer()
     {
         if (!IsConnected) return;
-        
+
         if (enableDebugLogging)
             Debug.Log("🌐 NetworkManager: Disconnecting from server");
-        
-        // TODO: Implement actual socket disconnection
-        
+
+        // Disconnect socket
+        socket?.Disconnect();
+
         IsConnected = false;
         IsHost = false;
         RoomCode = "";
         UpdateConnectionStatus("disconnected");
-        
+
         OnConnectionStateChanged?.Invoke(false);
     }
-    
+
+    /// <summary>
+    /// Setup all socket event handlers
+    /// </summary>
+    private void SetupSocketEventHandlers()
+    {
+        if (socket == null) return;
+
+        // Connection events
+        socket.On("disconnect", (data) => {
+            IsConnected = false;
+            UpdateConnectionStatus("disconnected");
+            OnConnectionStateChanged?.Invoke(false);
+            Debug.LogWarning("🔌 Disconnected from server");
+        });
+
+        socket.On("connection_error", (data) => {
+            OnConnectionError?.Invoke(data);
+            Debug.LogError($"❌ Connection error: {data}");
+        });
+
+        // Room events
+        socket.On("room_created", HandleRoomCreated);
+        socket.On("room_joined", HandleRoomJoined);
+        socket.On("player_joined", HandlePlayerJoined);
+        socket.On("player_left", HandlePlayerLeft);
+        socket.On("room_error", HandleRoomError);
+
+        // Matchmaking events
+        socket.On("match_found", HandleMatchFound);
+        socket.On("matchmaking_queue_joined", HandleQueueJoined);
+
+        // Game events
+        socket.On("game_started", HandleGameStarted);
+        socket.On("move_received", HandleMoveReceived);
+        socket.On("game_state_updated", HandleGameStateUpdated);
+        socket.On("game_ended", HandleGameEnded);
+
+        if (enableDebugLogging)
+            Debug.Log("✅ Socket event handlers configured");
+    }
+
+    #endregion
+
+    #region Event Handlers
+
+    /// <summary>
+    /// Handle room created event from server
+    /// </summary>
+    private void HandleRoomCreated(string data)
+    {
+        try
+        {
+            var response = JsonUtility.FromJson<RoomCreatedResponse>(data);
+            RoomCode = response.roomCode;
+            SetAssignedColor(ParseColor(response.assignedColor));
+            IsHost = response.isHost;
+
+            if (enableDebugLogging)
+                Debug.Log($"🏠 Room created: {RoomCode}, Color: {AssignedColor}, Host: {IsHost}");
+
+            OnRoomCreated?.Invoke(RoomCode, AssignedColor);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"❌ Error handling room_created: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Handle room joined event from server
+    /// </summary>
+    private void HandleRoomJoined(string data)
+    {
+        try
+        {
+            var response = JsonUtility.FromJson<RoomJoinedResponse>(data);
+            RoomCode = response.roomCode;
+            SetAssignedColor(ParseColor(response.assignedColor));
+            IsHost = false;
+
+            if (enableDebugLogging)
+                Debug.Log($"🚪 Joined room: {RoomCode}, Color: {AssignedColor}");
+
+            OnRoomJoined?.Invoke(RoomCode, AssignedColor);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"❌ Error handling room_joined: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Handle player joined event
+    /// </summary>
+    private void HandlePlayerJoined(string data)
+    {
+        try
+        {
+            var playerInfo = JsonUtility.FromJson<ChessNetwork.NetworkPlayerInfo>(data);
+
+            if (enableDebugLogging)
+                Debug.Log($"👤 Player joined: {playerInfo.playerName} ({playerInfo.assignedColor})");
+
+            connectedPlayers[playerInfo.playerId] = playerInfo;
+            OnPlayerJoined?.Invoke(playerInfo);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"❌ Error handling player_joined: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Handle player left event
+    /// </summary>
+    private void HandlePlayerLeft(string data)
+    {
+        try
+        {
+            var playerInfo = JsonUtility.FromJson<ChessNetwork.NetworkPlayerInfo>(data);
+
+            if (enableDebugLogging)
+                Debug.Log($"👋 Player left: {playerInfo.playerName}");
+
+            connectedPlayers.Remove(playerInfo.playerId);
+            OnPlayerLeft?.Invoke(playerInfo);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"❌ Error handling player_left: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Handle room error event
+    /// </summary>
+    private void HandleRoomError(string data)
+    {
+        try
+        {
+            var error = JsonUtility.FromJson<ErrorResponse>(data);
+            string errorMsg = error.error ?? data;
+
+            Debug.LogError($"❌ Room error: {errorMsg}");
+            OnRoomError?.Invoke(errorMsg);
+        }
+        catch
+        {
+            OnRoomError?.Invoke(data);
+        }
+    }
+
+    /// <summary>
+    /// Handle match found event (from matchmaking)
+    /// </summary>
+    private void HandleMatchFound(string data)
+    {
+        try
+        {
+            var response = JsonUtility.FromJson<MatchFoundResponse>(data);
+            RoomCode = response.roomCode;
+            SetAssignedColor(ParseColor(response.assignedColor));
+            IsHost = response.isHost;
+
+            if (enableDebugLogging)
+                Debug.Log($"🎯 Match found! Room: {RoomCode}, Color: {AssignedColor}");
+
+            OnMatchFound?.Invoke(RoomCode, AssignedColor);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"❌ Error handling match_found: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Handle queue joined event
+    /// </summary>
+    private void HandleQueueJoined(string data)
+    {
+        if (enableDebugLogging)
+            Debug.Log($"🎮 Joined matchmaking queue: {data}");
+
+        OnMatchmakingProgress?.Invoke("Searching for match...");
+    }
+
+    /// <summary>
+    /// Handle game started event
+    /// </summary>
+    private void HandleGameStarted(string data)
+    {
+        if (enableDebugLogging)
+            Debug.Log($"🎮 Game started: {data}");
+
+        OnGameStarted?.Invoke();
+    }
+
+    /// <summary>
+    /// Handle move received event
+    /// </summary>
+    private void HandleMoveReceived(string data)
+    {
+        try
+        {
+            var moveData = JsonUtility.FromJson<ChessNetwork.NetworkMoveData>(data);
+
+            if (enableDebugLogging)
+                Debug.Log($"📨 Move received: ({moveData.fromX},{moveData.fromY},{moveData.fromZ}) → ({moveData.toX},{moveData.toY},{moveData.toZ})");
+
+            OnMoveReceived?.Invoke(moveData);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"❌ Error handling move_received: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Handle game state updated event
+    /// </summary>
+    private void HandleGameStateUpdated(string data)
+    {
+        try
+        {
+            var gameState = JsonUtility.FromJson<ChessNetwork.NetworkGameState>(data);
+            lastGameState = gameState;
+
+            if (enableDebugLogging)
+                Debug.Log($"🎮 Game state updated: Phase={gameState.phase}, Turn={gameState.currentPlayerColor}");
+
+            OnGameStateUpdated?.Invoke(gameState);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"❌ Error handling game_state_updated: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Handle game ended event
+    /// </summary>
+    private void HandleGameEnded(string data)
+    {
+        try
+        {
+            var result = JsonUtility.FromJson<GameEndedResponse>(data);
+
+            if (enableDebugLogging)
+                Debug.Log($"🏁 Game ended: {result.result}");
+
+            OnGameEnded?.Invoke(result.result);
+        }
+        catch
+        {
+            OnGameEnded?.Invoke(data);
+        }
+    }
+
+    /// <summary>
+    /// Parse color string to PieceColor enum
+    /// </summary>
+    private PieceColor ParseColor(string colorString)
+    {
+        if (System.Enum.TryParse<PieceColor>(colorString, true, out PieceColor color))
+        {
+            return color;
+        }
+        return PieceColor.White; // Default
+    }
+
+    // Helper classes for JSON parsing
+    [System.Serializable]
+    private class RoomCreatedResponse
+    {
+        public string roomCode;
+        public string assignedColor;
+        public bool isHost;
+    }
+
+    [System.Serializable]
+    private class RoomJoinedResponse
+    {
+        public string roomCode;
+        public string assignedColor;
+    }
+
+    [System.Serializable]
+    private class MatchFoundResponse
+    {
+        public string roomCode;
+        public string assignedColor;
+        public bool isHost;
+    }
+
+    [System.Serializable]
+    private class ErrorResponse
+    {
+        public string error;
+    }
+
+    [System.Serializable]
+    private class GameEndedResponse
+    {
+        public string result;
+    }
+
+    #endregion
+
+    #region Legacy Code (To Be Removed)
+
     /// <summary>
     /// Connect to Socket.IO server if package is available
     /// </summary>
@@ -693,18 +980,22 @@ public class NetworkManager : MonoBehaviour
             Debug.Log($"🏠 NetworkManager: Creating room for player {playerName} with {configDesc}");
         }
         
-        if (hasSocketIOPackage && socket != null)
+        // Send create room message to server via Socket.IO
+        var roomData = new
         {
-            // Send real create room message to server
-            SendCreateRoomMessage(playerName, gameConfig);
-        }
-        else
-        {
-            // Fall back to simulation
+            playerName = playerName,
+            maxPlayers = gameConfig?.playerCount ?? 2,
+            boardSize = gameConfig?.boardSize ?? 8,
+            chaosMode = gameConfig?.enableChaosMode ?? false,
+            timedPlay = gameConfig?.enableTimedPlay ?? false,
+            timeLimit = gameConfig?.timeLimit ?? 600,
+            isPublic = false  // Can be made configurable later
+        };
+
+        socket.EmitJson("create_room", roomData, (response) => {
             if (enableDebugLogging)
-                Debug.LogWarning("🔄 No Socket.IO connection - using simulation mode");
-            StartCoroutine(SimulateRoomCreation());
-        }
+                Debug.Log($"📨 Room creation response: {response}");
+        });
     }
     
     /// <summary>
@@ -724,18 +1015,52 @@ public class NetworkManager : MonoBehaviour
         if (enableDebugLogging)
             Debug.Log($"🚪 NetworkManager: Joining room {roomCode} as player {playerName}");
         
-        if (hasSocketIOPackage && socket != null)
+        // Send join room message to server via Socket.IO
+        var joinData = new
         {
-            // Send real join room message to server
-            SendJoinRoomMessage(roomCode, playerName);
-        }
-        else
-        {
-            // Fall back to simulation
+            roomCode = roomCode.ToUpper(),
+            playerName = playerName
+        };
+
+        socket.EmitJson("join_room", joinData, (response) => {
             if (enableDebugLogging)
-                Debug.LogWarning("🔄 No Socket.IO connection - using simulation mode");
-            StartCoroutine(SimulateRoomJoining(roomCode));
+                Debug.Log($"📨 Room join response: {response}");
+        });
+    }
+
+    /// <summary>
+    /// Send a move to the server
+    /// </summary>
+    public void SendMove(BoardPosition from, BoardPosition to, PieceColor playerColor)
+    {
+        if (!IsConnected || string.IsNullOrEmpty(RoomCode))
+        {
+            if (enableDebugLogging)
+                Debug.LogWarning("⚠️ Cannot send move - not connected or not in a room");
+            return;
         }
+
+        // Create move data
+        var moveData = new NetworkMoveData
+        {
+            fromX = from.x,
+            fromY = from.y,
+            fromZ = from.z,
+            toX = to.x,
+            toY = to.y,
+            toZ = to.z,
+            playerColor = playerColor.ToString(),
+            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+
+        // Send move to server
+        socket.EmitJson("send_move", moveData, (response) => {
+            if (enableDebugLogging)
+                Debug.Log($"📨 Move sent: {from} → {to}");
+        });
+
+        // Add to pending moves queue
+        pendingMoves.Enqueue(moveData);
     }
     
     /// <summary>
