@@ -221,157 +221,6 @@ public class NetworkManager : MonoBehaviour
         return null;
     }
     
-    /// <summary>
-    /// Detect which Socket.IO package is available
-    /// </summary>
-    private void DetectSocketIOPackage()
-    {
-        try
-        {
-            if (enableDebugLogging)
-                Debug.Log("🔍 Starting Socket.IO package detection...");
-            
-            // Check for SocketIOUnityAssembly specifically
-            var assemblies = System.AppDomain.CurrentDomain.GetAssemblies();
-            foreach (var assembly in assemblies)
-            {
-                if (enableDebugLogging)
-                    Debug.Log($"🔍 Found assembly: {assembly.GetName().Name}");
-                
-                if (assembly.GetName().Name == "SocketIOUnityAssembly")
-                {
-                    hasSocketIOPackage = true;
-                    detectedPackage = "SocketIOUnityAssembly";
-                    if (enableDebugLogging)
-                        Debug.Log("✅ SocketIOUnityAssembly detected!");
-                    return;
-                }
-            }
-            
-            // Try to detect SocketIOUnity package
-            var socketIOUnityType = System.Type.GetType("SocketIOUnity.SocketIOUnity, SocketIOUnity");
-            if (socketIOUnityType != null)
-            {
-                hasSocketIOPackage = true;
-                detectedPackage = "SocketIOUnity";
-                if (enableDebugLogging)
-                    Debug.Log("✅ SocketIOUnity package detected");
-                return;
-            }
-            
-            // Try alternate SocketIOUnity assembly reference
-            var socketIOUnityType2 = System.Type.GetType("SocketIOUnity.SocketIOUnity, SocketIOUnityAssembly");
-            if (socketIOUnityType2 != null)
-            {
-                hasSocketIOPackage = true;
-                detectedPackage = "SocketIOUnityAssembly";
-                if (enableDebugLogging)
-                    Debug.Log("✅ SocketIOUnity package detected via SocketIOUnityAssembly");
-                return;
-            }
-            
-            // Try to detect SocketIOComponent
-            var socketIOComponentType = System.Type.GetType("SocketIOUnity.SocketIOComponent");
-            if (socketIOComponentType != null)
-            {
-                hasSocketIOPackage = true;
-                detectedPackage = "SocketIOUnity.Component";
-                if (enableDebugLogging)
-                    Debug.Log("✅ SocketIOComponent package detected");
-                return;
-            }
-            
-            // Try to detect BestHTTP Socket.IO
-            var bestHTTPType = System.Type.GetType("BestHTTP.SocketIO.SocketManager");
-            if (bestHTTPType != null)
-            {
-                hasSocketIOPackage = true;
-                detectedPackage = "BestHTTP";
-                if (enableDebugLogging)
-                    Debug.Log("✅ BestHTTP Socket.IO detected");
-                return;
-            }
-            
-            // Try to detect other common Socket.IO packages
-            var socketClientType = System.Type.GetType("SocketIOClient.SocketIO");
-            if (socketClientType != null)
-            {
-                hasSocketIOPackage = true;
-                detectedPackage = "SocketIOClient";
-                if (enableDebugLogging)
-                    Debug.Log("✅ SocketIOClient package detected");
-                return;
-            }
-            
-            // No Socket.IO package found
-            hasSocketIOPackage = false;
-            detectedPackage = "None (Simulation Mode)";
-            
-            if (enableDebugLogging)
-                Debug.LogWarning("⚠️ No Socket.IO package detected - using simulation mode");
-                
-        }
-        catch (Exception e)
-        {
-            hasSocketIOPackage = false;
-            detectedPackage = $"Error: {e.Message}";
-            Debug.LogError($"❌ Error detecting Socket.IO package: {e.Message}");
-        }
-    }
-    
-    /// <summary>
-    /// Initialize socket connection based on detected package
-    /// </summary>
-    private void InitializeSocket()
-    {
-        if (!hasSocketIOPackage)
-        {
-            if (enableDebugLogging)
-                Debug.Log("🔄 Initializing simulation mode (no Socket.IO package)");
-            return;
-        }
-        
-        try
-        {
-            // Initialize based on detected package
-#if USE_SOCKETIO_UNITY
-            InitializeSocketIOUnity();
-#elif USE_BESTHTTP_SOCKETIO
-            InitializeBestHTTP();
-#else
-            if (enableDebugLogging)
-                Debug.Log("🔄 Socket.IO package detected but not configured in preprocessor directives");
-#endif
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"❌ Error initializing socket: {e.Message}");
-            hasSocketIOPackage = false; // Fall back to simulation
-        }
-    }
-    
-#if USE_SOCKETIO_UNITY
-    private void InitializeSocketIOUnity()
-    {
-        if (enableDebugLogging)
-            Debug.Log("🔧 Initializing SocketIOUnity...");
-            
-        // This will be implemented when SocketIOUnity is properly configured
-        // For now, just log that we reached this point
-        Debug.Log("✅ SocketIOUnity initialization placeholder");
-    }
-#endif
-    
-#if USE_BESTHTTP_SOCKETIO
-    private void InitializeBestHTTP()
-    {
-        if (enableDebugLogging)
-            Debug.Log("🔧 Initializing BestHTTP Socket.IO...");
-            
-        // This will be implemented when BestHTTP is available
-        Debug.Log("✅ BestHTTP Socket.IO initialization placeholder");
-    }
-#endif
     
     #endregion
     
@@ -670,7 +519,7 @@ public class NetworkManager : MonoBehaviour
             lastGameState = gameState;
 
             if (enableDebugLogging)
-                Debug.Log($"🎮 Game state updated: Phase={gameState.phase}, Turn={gameState.currentPlayerColor}");
+                Debug.Log($"🎮 Game state updated: Phase={gameState.gamePhase}, Turn={gameState.currentPlayer}");
 
             OnGameStateUpdated?.Invoke(gameState);
         }
@@ -750,205 +599,14 @@ public class NetworkManager : MonoBehaviour
 
     #endregion
 
-    #region Legacy Code (To Be Removed)
-
-    /// <summary>
-    /// Connect to Socket.IO server if package is available
-    /// </summary>
-    private void ConnectToSocketIOServer()
-    {
-        try
-        {
-            if (enableDebugLogging)
-                Debug.Log("🔌 Attempting real Socket.IO connection...");
-            
-            // For now, create a test GameObject with SocketIOComponent if available
-            var socketIOComponentType = System.Type.GetType("SocketIOUnity.SocketIOComponent");
-            if (socketIOComponentType != null)
-            {
-                // Create a test connection using SocketIOComponent
-                GameObject socketIOObj = new GameObject("SocketIOConnection");
-                var socketComponent = socketIOObj.AddComponent(socketIOComponentType);
-                
-                if (socketComponent != null)
-                {
-                    if (enableDebugLogging)
-                        Debug.Log("✅ SocketIOComponent created successfully!");
-                    
-                    // Configure the socket connection with current server URL
-                    string currentServerUrl = CurrentConnectionStatus.serverUrl;
-                    var urlField = socketIOComponentType.GetField("url");
-                    if (urlField != null)
-                    {
-                        urlField.SetValue(socketComponent, currentServerUrl);
-                        if (enableDebugLogging)
-                            Debug.Log($"🔌 Socket URL set to: {currentServerUrl}");
-                    }
-                    
-                    var autoConnectField = socketIOComponentType.GetField("autoConnect");
-                    if (autoConnectField != null)
-                    {
-                        autoConnectField.SetValue(socketComponent, true);
-                        if (enableDebugLogging)
-                            Debug.Log("🔌 AutoConnect enabled");
-                    }
-                    
-                    // Set additional Socket.IO options if available
-                    SetSocketIOOptions(socketComponent, socketIOComponentType);
-                    
-                    // Store the component reference
-                    socket = socketComponent;
-                    
-                    if (enableDebugLogging)
-                        Debug.Log("🔌 Socket.IO connection configured and initiated");
-                        
-                    // Start checking connection status
-                    StartCoroutine(CheckSocketIOConnection());
-                }
-                else
-                {
-                    Debug.LogError("❌ Failed to create SocketIOComponent");
-                    StartCoroutine(SimulateConnection());
-                }
-            }
-            else
-            {
-                Debug.LogWarning("⚠️ SocketIOComponent type not found - falling back to simulation");
-                StartCoroutine(SimulateConnection());
-            }
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"❌ Error creating Socket.IO connection: {e.Message}");
-            StartCoroutine(SimulateConnection());
-        }
-    }
-    
-    /// <summary>
-    /// Set additional Socket.IO options for better compatibility
-    /// </summary>
-    private void SetSocketIOOptions(object socketComponent, System.Type socketIOComponentType)
-    {
-        try
-        {
-            // Set authentication token for cross-platform compatibility
-            var queryField = socketIOComponentType.GetField("query");
-            if (queryField != null)
-            {
-                // Create query string with Unity identifier
-                var queryDict = new System.Collections.Generic.Dictionary<string, string>();
-                queryDict["token"] = "UNITY";
-                queryDict["playerId"] = "unity_" + System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                queryDict["playerName"] = "UnityPlayer";
-                queryField.SetValue(socketComponent, queryDict);
-                
-                if (enableDebugLogging)
-                    Debug.Log("🔌 Socket.IO query parameters set for Unity authentication");
-            }
-            
-            // Set timeout options if available
-            var timeoutField = socketIOComponentType.GetField("timeout");
-            if (timeoutField != null)
-            {
-                timeoutField.SetValue(socketComponent, (int)(connectionTimeout * 1000)); // Convert to milliseconds
-                if (enableDebugLogging)
-                    Debug.Log($"🔌 Socket.IO timeout set to {connectionTimeout} seconds");
-            }
-            
-            // Enable reconnection if available
-            var reconnectionField = socketIOComponentType.GetField("reconnection");
-            if (reconnectionField != null)
-            {
-                reconnectionField.SetValue(socketComponent, true);
-                if (enableDebugLogging)
-                    Debug.Log("🔌 Socket.IO reconnection enabled");
-            }
-            
-            // Set reconnection attempts if available
-            var reconnectionAttemptsField = socketIOComponentType.GetField("reconnectionAttempts");
-            if (reconnectionAttemptsField != null)
-            {
-                reconnectionAttemptsField.SetValue(socketComponent, maxReconnectAttempts);
-                if (enableDebugLogging)
-                    Debug.Log($"🔌 Socket.IO reconnection attempts set to {maxReconnectAttempts}");
-            }
-        }
-        catch (Exception e)
-        {
-            if (enableDebugLogging)
-                Debug.LogWarning($"⚠️ Could not set some Socket.IO options: {e.Message}");
-        }
-    }
-    
-    /// <summary>
-    /// Check Socket.IO connection status
-    /// </summary>
-    private System.Collections.IEnumerator CheckSocketIOConnection()
-    {
-        float timeout = connectionTimeout;
-        float elapsed = 0f;
-        
-        while (elapsed < timeout && !IsConnected)
-        {
-            // Check if socket is connected
-            if (socket != null)
-            {
-                var connectedProperty = socket.GetType().GetProperty("connected");
-                if (connectedProperty != null)
-                {
-                    bool connected = (bool)connectedProperty.GetValue(socket);
-                    if (connected)
-                    {
-                        IsConnected = true;
-                        UpdateConnectionStatus("connected");
-                        OnConnectionStateChanged?.Invoke(true);
-                        
-                        if (enableDebugLogging)
-                            Debug.Log("✅ Socket.IO connection successful!");
-                        
-                        yield break;
-                    }
-                }
-            }
-            
-            elapsed += 0.1f;
-            yield return new UnityEngine.WaitForSeconds(0.1f);
-        }
-        
-        // Connection failed or timed out
-        if (!IsConnected)
-        {
-            Debug.LogWarning($"⚠️ Socket.IO connection timeout after {timeout} seconds");
-            OnConnectionError?.Invoke("Connection timeout");
-            UpdateConnectionStatus("error");
-        }
-    }
-    
-    /// <summary>
-    /// Temporary method to simulate connection for UI testing
-    /// </summary>
-    private System.Collections.IEnumerator SimulateConnection()
-    {
-        yield return new UnityEngine.WaitForSeconds(1f);
-        
-        IsConnected = true;
-        UpdateConnectionStatus("connected");
-        OnConnectionStateChanged?.Invoke(true);
-        
-        if (enableDebugLogging)
-            Debug.Log("🌐 NetworkManager: Simulated connection successful");
-    }
-    
     private void UpdateConnectionStatus(string status)
     {
         CurrentConnectionStatus.status = status;
         CurrentConnectionStatus.isConnected = IsConnected;
         CurrentConnectionStatus.lastHeartbeat = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        
+
         OnConnectionStatusUpdated?.Invoke(CurrentConnectionStatus);
     }
-    
-    #endregion
     
     #region Room Management
     
@@ -981,14 +639,27 @@ public class NetworkManager : MonoBehaviour
         }
         
         // Send create room message to server via Socket.IO
+        // Convert BoardSize enum to integer (Small4x4x4=4, Medium6x6x6=6, Large8x8x8=8)
+        int boardSizeInt = 8; // default
+        if (gameConfig != null)
+        {
+            boardSizeInt = gameConfig.boardSize switch
+            {
+                BoardSize.Small4x4x4 => 4,
+                BoardSize.Medium6x6x6 => 6,
+                BoardSize.Large8x8x8 => 8,
+                _ => 8
+            };
+        }
+
         var roomData = new
         {
             playerName = playerName,
             maxPlayers = gameConfig?.playerCount ?? 2,
-            boardSize = gameConfig?.boardSize ?? 8,
+            boardSize = boardSizeInt,
             chaosMode = gameConfig?.enableChaosMode ?? false,
             timedPlay = gameConfig?.enableTimedPlay ?? false,
-            timeLimit = gameConfig?.timeLimit ?? 600,
+            timeLimit = (gameConfig?.timePerPlayerMinutes ?? 10) * 60, // Convert minutes to seconds
             isPublic = false  // Can be made configurable later
         };
 
