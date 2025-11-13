@@ -1519,27 +1519,6 @@ public class NetworkManager : MonoBehaviour
     #region Move Management
     
     /// <summary>
-    /// Send a move to the server
-    /// </summary>
-    public void SendMove(BoardPosition from, BoardPosition to, PieceColor playerColor)
-    {
-        if (!IsConnected || string.IsNullOrEmpty(RoomCode))
-        {
-            Debug.LogError("🌐 NetworkManager: Cannot send move - not connected or not in room");
-            return;
-        }
-        
-        var moveData = new NetworkMoveData(from, to, playerColor, GetNextMoveNumber());
-        
-        if (enableDebugLogging)
-            Debug.Log($"🎯 NetworkManager: Sending move {from} → {to} for {playerColor}");
-        
-        // TODO: Send actual move to server
-        // For now, add to pending queue for testing
-        pendingMoves.Enqueue(moveData);
-    }
-    
-    /// <summary>
     /// Start the game (host only)
     /// </summary>
     public void StartGame()
