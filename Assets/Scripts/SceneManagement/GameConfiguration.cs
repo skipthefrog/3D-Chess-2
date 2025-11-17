@@ -47,6 +47,11 @@ public class GameConfiguration
     [Header("Timed Play Settings")]
     public bool enableTimedPlay = false;      // Enable timed play mode
     public int timePerPlayerMinutes = 10;     // Minutes per player (default 10, range 3-30)
+
+    [Header("Online Multiplayer Settings")]
+    public bool isOnlineGame = false;         // Is this an online multiplayer game?
+    public bool isPublicGame = false;         // Is this game visible in public lobby?
+    public string roomCode = "";              // Room code for online game
     
     /// <summary>
     /// Default constructor with Human vs Human setup

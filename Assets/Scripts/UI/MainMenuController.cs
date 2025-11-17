@@ -11,7 +11,18 @@ public enum MenuStep
     PlayerCount,        // Select number of players (2, 4, or 6)
     SideSelection,      // Select player types for each position (Human or AI toggle per player)
     BoardSize,          // Select board size with chaos mode and timed play options
-    FinalConfirmation   // Review and confirm all settings
+    FinalConfirmation,  // Review and confirm all settings
+
+    // Online Multiplayer Steps
+    OnlineConnection,      // Connecting to server
+    OnlineModeSelection,   // Choose Create/Join/Matchmaking/Friends
+    OnlineGameCreation,    // Create game settings (reuses existing panels)
+    OnlinePublicPrivate,   // Select public or private game
+    OnlineRoomCodeEntry,   // Enter room code to join
+    OnlineLobbyBrowser,    // Browse public games
+    OnlineMatchmaking,     // Matchmaking preferences
+    OnlineFriendsList,     // Friends list and invitations
+    OnlineWaitingRoom      // Waiting for players to join
 }
 
 /// <summary>
@@ -71,6 +82,16 @@ public class MainMenuController : MonoBehaviour
     public GameObject sideSelectionPanel;
     public GameObject boardSizePanel;
     public GameObject confirmationPanel;
+
+    [Header("Online Multiplayer - Panels")]
+    public GameObject onlineConnectionPanel;
+    public GameObject onlineModeSelectionPanel;
+    public GameObject onlinePublicPrivatePanel;
+    public GameObject onlineRoomCodeEntryPanel;
+    public GameObject onlineLobbyBrowserPanel;
+    public GameObject onlineMatchmakingPanel;
+    public GameObject onlineFriendsListPanel;
+    public GameObject onlineWaitingRoomPanel;
     
     [Header("Enhanced Menu Flow - Controls")]
     public Button backButton;
@@ -99,10 +120,16 @@ public class MainMenuController : MonoBehaviour
     // Current configuration
     private GameConfiguration currentConfig;
     private PieceColor humanPlayerColor = PieceColor.White;
-    
+
     // UI State
     private bool isLoading = false;
     private bool hasSelectedAICount = false; // Track if user has explicitly selected AI count
+
+    // Online Multiplayer State
+    private bool isOnlineMode = false;
+    private bool isConnectingToServer = false;
+    private bool isPublicGame = false;
+    private string enteredRoomCode = "";
     private bool hasSelectedBoardSize = false; // Track if user has explicitly selected board size
     
     private void Start()
@@ -740,13 +767,12 @@ public class MainMenuController : MonoBehaviour
                                          StartEnhancedFlow();
                                      });
 
-        // New Online Game Button - middle button (placeholder for future feature)
+        // New Online Game Button - middle button
         Button newOnlineGameButton = CreateUIButton("NewOnlineGameButton", "New Online Game", mainMenuPanel,
                                    new Vector2(0.1f, 0.27f), new Vector2(0.9f, 0.42f),
                                    () => {
                                        Debug.Log("🌐 MainMenuController: New Online Game button clicked!");
-                                       Debug.LogWarning("Online multiplayer not yet implemented - coming soon!");
-                                       // TODO: Implement online multiplayer flow
+                                       StartOnlineMultiplayerFlow();
                                    });
 
         // Exit Button - smaller and lower
@@ -1809,7 +1835,355 @@ public class MainMenuController : MonoBehaviour
 
         Debug.Log("🎨 MainMenuController: Confirmation panel created with Confirm button");
     }
-    
+
+    // ==========================
+    // ONLINE MULTIPLAYER PANELS
+    // ==========================
+
+    /// <summary>
+    /// Create online connection panel (shows while connecting to server)
+    /// </summary>
+    private void CreateOnlineConnectionPanel(GameObject parent)
+    {
+        onlineConnectionPanel = new GameObject("OnlineConnectionPanel");
+        onlineConnectionPanel.transform.SetParent(parent.transform, false);
+
+        RectTransform panelRect = onlineConnectionPanel.AddComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.2f, 0.3f);
+        panelRect.anchorMax = new Vector2(0.8f, 0.7f);
+        panelRect.sizeDelta = Vector2.zero;
+
+        // Title
+        CreateUIText("Title", "Connecting to Server...", onlineConnectionPanel,
+                    new Vector2(0, 0.7f), new Vector2(1, 0.9f), 28);
+
+        // Status message
+        CreateUIText("Status", "Please wait while we connect to the multiplayer server.\n\nThis may take a few moments.",
+                    onlineConnectionPanel, new Vector2(0.1f, 0.3f), new Vector2(0.9f, 0.7f), 18);
+
+        Debug.Log("🎨 MainMenuController: Online connection panel created");
+    }
+
+    /// <summary>
+    /// Create online mode selection panel (Create/Join/Matchmaking/Friends)
+    /// </summary>
+    private void CreateOnlineModeSelectionPanel(GameObject parent)
+    {
+        onlineModeSelectionPanel = new GameObject("OnlineModeSelectionPanel");
+        onlineModeSelectionPanel.transform.SetParent(parent.transform, false);
+
+        RectTransform panelRect = onlineModeSelectionPanel.AddComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.15f, 0.15f);
+        panelRect.anchorMax = new Vector2(0.85f, 0.85f);
+        panelRect.sizeDelta = Vector2.zero;
+
+        // Title
+        CreateUIText("Title", "Online Multiplayer", onlineModeSelectionPanel,
+                    new Vector2(0, 0.85f), new Vector2(1, 0.95f), 28);
+
+        // Instructions
+        CreateUIText("Instructions", "Choose how you want to play:",
+                    onlineModeSelectionPanel, new Vector2(0, 0.77f), new Vector2(1, 0.85f), 18);
+
+        // Create Game button
+        CreateUIButton("CreateGameButton", "Create Game", onlineModeSelectionPanel,
+                      new Vector2(0.1f, 0.58f), new Vector2(0.9f, 0.72f),
+                      () => {
+                          Debug.Log("🎮 Create Game selected");
+                          // Reuse existing player count panel
+                          ShowStep(MenuStep.PlayerCount);
+                      });
+
+        // Join by Code button
+        CreateUIButton("JoinByCodeButton", "Join by Room Code", onlineModeSelectionPanel,
+                      new Vector2(0.1f, 0.42f), new Vector2(0.9f, 0.56f),
+                      () => {
+                          Debug.Log("🚪 Join by Code selected");
+                          ShowStep(MenuStep.OnlineRoomCodeEntry);
+                      });
+
+        // Browse Games button
+        CreateUIButton("BrowseGamesButton", "Browse Public Games", onlineModeSelectionPanel,
+                      new Vector2(0.1f, 0.26f), new Vector2(0.9f, 0.40f),
+                      () => {
+                          Debug.Log("📋 Browse Games selected");
+                          ShowStep(MenuStep.OnlineLobbyBrowser);
+                      });
+
+        // Find Match button
+        CreateUIButton("FindMatchButton", "Find Match (Matchmaking)", onlineModeSelectionPanel,
+                      new Vector2(0.1f, 0.10f), new Vector2(0.9f, 0.24f),
+                      () => {
+                          Debug.Log("🔍 Find Match selected");
+                          ShowStep(MenuStep.OnlineMatchmaking);
+                      });
+
+        // Back button (return to main menu)
+        CreateUIButton("BackToMainButton", "Back to Main Menu", onlineModeSelectionPanel,
+                      new Vector2(0.3f, 0.02f), new Vector2(0.7f, 0.08f),
+                      () => {
+                          isOnlineMode = false;
+                          NetworkManager.Instance.DisconnectFromServer();
+                          ShowStep(MenuStep.MainMenu);
+                      });
+
+        Debug.Log("🎨 MainMenuController: Online mode selection panel created");
+    }
+
+    /// <summary>
+    /// Create online public/private selection panel
+    /// </summary>
+    private void CreateOnlinePublicPrivatePanel(GameObject parent)
+    {
+        onlinePublicPrivatePanel = new GameObject("OnlinePublicPrivatePanel");
+        onlinePublicPrivatePanel.transform.SetParent(parent.transform, false);
+
+        RectTransform panelRect = onlinePublicPrivatePanel.AddComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.2f, 0.25f);
+        panelRect.anchorMax = new Vector2(0.8f, 0.75f);
+        panelRect.sizeDelta = Vector2.zero;
+
+        // Title
+        CreateUIText("Title", "Create Game", onlinePublicPrivatePanel,
+                    new Vector2(0, 0.8f), new Vector2(1, 0.95f), 28);
+
+        // Instructions
+        CreateUIText("Instructions", "Would you like to create a public or private game?",
+                    onlinePublicPrivatePanel, new Vector2(0.05f, 0.68f), new Vector2(0.95f, 0.8f), 18);
+
+        // Public game button
+        CreateUIButton("PublicGameButton", "Public Game\n\nAnyone can find and join this game in the lobby",
+                      onlinePublicPrivatePanel,
+                      new Vector2(0.1f, 0.42f), new Vector2(0.9f, 0.65f),
+                      () => {
+                          Debug.Log("🌍 Public game selected");
+                          isPublicGame = true;
+                          CreateOnlineRoom();
+                      });
+
+        // Private game button
+        CreateUIButton("PrivateGameButton", "Private Game\n\nOnly players with the room code can join",
+                      onlinePublicPrivatePanel,
+                      new Vector2(0.1f, 0.16f), new Vector2(0.9f, 0.39f),
+                      () => {
+                          Debug.Log("🔒 Private game selected");
+                          isPublicGame = false;
+                          CreateOnlineRoom();
+                      });
+
+        // Back button
+        CreateUIButton("BackButton", "Back", onlinePublicPrivatePanel,
+                      new Vector2(0.3f, 0.03f), new Vector2(0.7f, 0.12f),
+                      () => ShowStep(MenuStep.BoardSize));
+
+        Debug.Log("🎨 MainMenuController: Public/Private selection panel created");
+    }
+
+    /// <summary>
+    /// Create online room code entry panel
+    /// </summary>
+    private void CreateOnlineRoomCodeEntryPanel(GameObject parent)
+    {
+        onlineRoomCodeEntryPanel = new GameObject("OnlineRoomCodeEntryPanel");
+        onlineRoomCodeEntryPanel.transform.SetParent(parent.transform, false);
+
+        RectTransform panelRect = onlineRoomCodeEntryPanel.AddComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.2f, 0.3f);
+        panelRect.anchorMax = new Vector2(0.8f, 0.7f);
+        panelRect.sizeDelta = Vector2.zero;
+
+        // Title
+        CreateUIText("Title", "Join Game by Room Code", onlineRoomCodeEntryPanel,
+                    new Vector2(0, 0.75f), new Vector2(1, 0.95f), 28);
+
+        // Instructions
+        CreateUIText("Instructions", "Enter the 6-character room code:",
+                    onlineRoomCodeEntryPanel, new Vector2(0.1f, 0.62f), new Vector2(0.9f, 0.75f), 18);
+
+        // Room code input field
+        GameObject inputFieldObj = CreateUIInputField("RoomCodeInput", "ABC123", onlineRoomCodeEntryPanel,
+                                                      new Vector2(0.2f, 0.48f), new Vector2(0.8f, 0.62f));
+        TMP_InputField roomCodeInput = inputFieldObj.GetComponent<TMP_InputField>();
+        if (roomCodeInput != null)
+        {
+            roomCodeInput.characterLimit = 6;
+            roomCodeInput.onValueChanged.AddListener((value) => {
+                enteredRoomCode = value.ToUpper();
+                roomCodeInput.text = enteredRoomCode;
+            });
+        }
+
+        // Join button
+        CreateUIButton("JoinButton", "Join Room", onlineRoomCodeEntryPanel,
+                      new Vector2(0.25f, 0.3f), new Vector2(0.75f, 0.44f),
+                      () => {
+                          if (string.IsNullOrEmpty(enteredRoomCode) || enteredRoomCode.Length != 6)
+                          {
+                              Debug.LogWarning("⚠️ Invalid room code");
+                              return;
+                          }
+                          JoinOnlineRoom(enteredRoomCode);
+                      });
+
+        // Back button
+        CreateUIButton("BackButton", "Back", onlineRoomCodeEntryPanel,
+                      new Vector2(0.3f, 0.1f), new Vector2(0.7f, 0.24f),
+                      () => ShowStep(MenuStep.OnlineModeSelection));
+
+        Debug.Log("🎨 MainMenuController: Room code entry panel created");
+    }
+
+    /// <summary>
+    /// Create online waiting room panel
+    /// </summary>
+    private void CreateOnlineWaitingRoomPanel(GameObject parent)
+    {
+        onlineWaitingRoomPanel = new GameObject("OnlineWaitingRoomPanel");
+        onlineWaitingRoomPanel.transform.SetParent(parent.transform, false);
+
+        RectTransform panelRect = onlineWaitingRoomPanel.AddComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.15f, 0.2f);
+        panelRect.anchorMax = new Vector2(0.85f, 0.8f);
+        panelRect.sizeDelta = Vector2.zero;
+
+        // Title
+        CreateUIText("Title", "Waiting Room", onlineWaitingRoomPanel,
+                    new Vector2(0, 0.85f), new Vector2(1, 0.95f), 28);
+
+        // Room code display
+        GameObject roomCodeTextObj = CreateUIText("RoomCodeText", "Room Code: Loading...", onlineWaitingRoomPanel,
+                                                  new Vector2(0, 0.72f), new Vector2(1, 0.85f), 24);
+
+        // Player list placeholder
+        CreateUIText("PlayersLabel", "Players in room:", onlineWaitingRoomPanel,
+                    new Vector2(0.1f, 0.6f), new Vector2(0.9f, 0.72f), 18);
+
+        GameObject playersTextObj = CreateUIText("PlayersText", "• You\n• Waiting for opponents...", onlineWaitingRoomPanel,
+                                                 new Vector2(0.1f, 0.3f), new Vector2(0.9f, 0.6f), 16);
+
+        // Start Game button (host only)
+        CreateUIButton("StartGameButton", "Start Game", onlineWaitingRoomPanel,
+                      new Vector2(0.2f, 0.15f), new Vector2(0.8f, 0.27f),
+                      () => {
+                          // TODO: Signal server to start game
+                          Debug.Log("🎮 Start game requested");
+                      });
+
+        // Cancel button
+        CreateUIButton("CancelButton", "Leave Room", onlineWaitingRoomPanel,
+                      new Vector2(0.3f, 0.03f), new Vector2(0.7f, 0.12f),
+                      () => {
+                          NetworkManager.Instance.LeaveRoom();
+                          ShowStep(MenuStep.OnlineModeSelection);
+                      });
+
+        Debug.Log("🎨 MainMenuController: Waiting room panel created");
+    }
+
+    /// <summary>
+    /// Create stub panels for features to be implemented
+    /// </summary>
+    private void CreateOnlineLobbyBrowserPanel(GameObject parent)
+    {
+        // TODO: Implement lobby browser
+        onlineLobbyBrowserPanel = CreateStubPanel(parent, "Lobby Browser (Coming Soon)", "OnlineLobbyBrowserPanel");
+    }
+
+    private void CreateOnlineMatchmakingPanel(GameObject parent)
+    {
+        // TODO: Implement matchmaking
+        onlineMatchmakingPanel = CreateStubPanel(parent, "Matchmaking (Coming Soon)", "OnlineMatchmakingPanel");
+    }
+
+    private void CreateOnlineFriendsListPanel(GameObject parent)
+    {
+        // TODO: Implement friends list
+        onlineFriendsListPanel = CreateStubPanel(parent, "Friends List (Coming Soon)", "OnlineFriendsListPanel");
+    }
+
+    private GameObject CreateStubPanel(GameObject parent, string message, string panelName)
+    {
+        GameObject panel = new GameObject(panelName);
+        panel.transform.SetParent(parent.transform, false);
+
+        RectTransform panelRect = panel.AddComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.2f, 0.3f);
+        panelRect.anchorMax = new Vector2(0.8f, 0.7f);
+        panelRect.sizeDelta = Vector2.zero;
+
+        CreateUIText("Title", message, panel, new Vector2(0, 0.4f), new Vector2(1, 0.6f), 24);
+        CreateUIButton("BackButton", "Back", panel, new Vector2(0.3f, 0.2f), new Vector2(0.7f, 0.35f),
+                      () => ShowStep(MenuStep.OnlineModeSelection));
+
+        return panel;
+    }
+
+    // ==========================
+    // ONLINE ROOM OPERATIONS
+    // ==========================
+
+    /// <summary>
+    /// Create an online room with current configuration
+    /// </summary>
+    private void CreateOnlineRoom()
+    {
+        Debug.Log($"🏠 Creating online room - Public: {isPublicGame}");
+
+        // Set online mode flag in configuration
+        currentConfig.isOnlineGame = true;
+        currentConfig.isPublicGame = isPublicGame;
+
+        // Create room via NetworkManager
+        NetworkManager.Instance.CreateRoom(NetworkManager.Instance.PlayerName, currentConfig);
+
+        // Subscribe to room created event
+        NetworkManager.Instance.OnRoomCreated += HandleRoomCreated;
+
+        // Show waiting room
+        ShowStep(MenuStep.OnlineWaitingRoom);
+    }
+
+    /// <summary>
+    /// Join an online room by code
+    /// </summary>
+    private void JoinOnlineRoom(string roomCode)
+    {
+        Debug.Log($"🚪 Joining online room: {roomCode}");
+
+        // Join room via NetworkManager
+        NetworkManager.Instance.JoinRoom(roomCode, NetworkManager.Instance.PlayerName);
+
+        // Subscribe to room joined event
+        NetworkManager.Instance.OnRoomJoined += HandleRoomJoined;
+
+        // Show waiting room
+        ShowStep(MenuStep.OnlineWaitingRoom);
+    }
+
+    /// <summary>
+    /// Handle room created event
+    /// </summary>
+    private void HandleRoomCreated(string roomCode, PieceColor assignedColor)
+    {
+        Debug.Log($"✅ Room created! Code: {roomCode}, Color: {assignedColor}");
+        NetworkManager.Instance.OnRoomCreated -= HandleRoomCreated;
+
+        // Update waiting room UI with room code
+        // TODO: Update UI dynamically
+    }
+
+    /// <summary>
+    /// Handle room joined event
+    /// </summary>
+    private void HandleRoomJoined(string roomCode, PieceColor assignedColor)
+    {
+        Debug.Log($"✅ Room joined! Code: {roomCode}, Color: {assignedColor}");
+        NetworkManager.Instance.OnRoomJoined -= HandleRoomJoined;
+
+        // Update waiting room UI
+        // TODO: Update UI dynamically
+    }
+
     /// <summary>
     /// Create navigation buttons
     /// </summary>
@@ -2158,6 +2532,16 @@ public class MainMenuController : MonoBehaviour
         if (sideSelectionPanel) { sideSelectionPanel.SetActive(false); Debug.Log("  - Side selection panel hidden"); }
         if (boardSizePanel) { boardSizePanel.SetActive(false); Debug.Log("  - Board size panel hidden"); }
         if (confirmationPanel) { confirmationPanel.SetActive(false); Debug.Log("  - Confirmation panel hidden"); }
+
+        // Hide online multiplayer panels
+        if (onlineConnectionPanel) { onlineConnectionPanel.SetActive(false); Debug.Log("  - Online connection panel hidden"); }
+        if (onlineModeSelectionPanel) { onlineModeSelectionPanel.SetActive(false); Debug.Log("  - Online mode selection panel hidden"); }
+        if (onlinePublicPrivatePanel) { onlinePublicPrivatePanel.SetActive(false); Debug.Log("  - Online public/private panel hidden"); }
+        if (onlineRoomCodeEntryPanel) { onlineRoomCodeEntryPanel.SetActive(false); Debug.Log("  - Online room code entry panel hidden"); }
+        if (onlineLobbyBrowserPanel) { onlineLobbyBrowserPanel.SetActive(false); Debug.Log("  - Online lobby browser panel hidden"); }
+        if (onlineMatchmakingPanel) { onlineMatchmakingPanel.SetActive(false); Debug.Log("  - Online matchmaking panel hidden"); }
+        if (onlineFriendsListPanel) { onlineFriendsListPanel.SetActive(false); Debug.Log("  - Online friends list panel hidden"); }
+        if (onlineWaitingRoomPanel) { onlineWaitingRoomPanel.SetActive(false); Debug.Log("  - Online waiting room panel hidden"); }
         
         // Hide any other UI elements that might be lingering from previous steps
         if (playerColorPanel) { playerColorPanel.SetActive(false); Debug.Log("  - Player color panel hidden"); }
@@ -2242,6 +2626,128 @@ public class MainMenuController : MonoBehaviour
                 string finalStepNumber = currentConfig.NeedsSideSelection() ? "Step 5" : "Step 4";
                 UpdateStepIndicator($"{finalStepNumber}: Confirmation");
                 UpdateConfirmationText();
+                break;
+
+            // Online Multiplayer Steps
+            case MenuStep.OnlineConnection:
+                if (onlineConnectionPanel != null)
+                {
+                    onlineConnectionPanel.SetActive(true);
+                    Debug.Log("  ✅ Online connection panel shown");
+                }
+                else
+                {
+                    // Create the panel if it doesn't exist
+                    CreateOnlineConnectionPanel(GameObject.Find("Canvas"));
+                    if (onlineConnectionPanel != null)
+                        onlineConnectionPanel.SetActive(true);
+                }
+                UpdateStepIndicator("Connecting to Server...");
+                break;
+
+            case MenuStep.OnlineModeSelection:
+                if (onlineModeSelectionPanel != null)
+                {
+                    onlineModeSelectionPanel.SetActive(true);
+                    Debug.Log("  ✅ Online mode selection panel shown");
+                }
+                else
+                {
+                    CreateOnlineModeSelectionPanel(GameObject.Find("Canvas"));
+                    if (onlineModeSelectionPanel != null)
+                        onlineModeSelectionPanel.SetActive(true);
+                }
+                UpdateStepIndicator("Online Multiplayer - Choose Mode");
+                break;
+
+            case MenuStep.OnlinePublicPrivate:
+                if (onlinePublicPrivatePanel != null)
+                {
+                    onlinePublicPrivatePanel.SetActive(true);
+                    Debug.Log("  ✅ Online public/private panel shown");
+                }
+                else
+                {
+                    CreateOnlinePublicPrivatePanel(GameObject.Find("Canvas"));
+                    if (onlinePublicPrivatePanel != null)
+                        onlinePublicPrivatePanel.SetActive(true);
+                }
+                UpdateStepIndicator("Create Game - Public or Private");
+                break;
+
+            case MenuStep.OnlineRoomCodeEntry:
+                if (onlineRoomCodeEntryPanel != null)
+                {
+                    onlineRoomCodeEntryPanel.SetActive(true);
+                    Debug.Log("  ✅ Online room code entry panel shown");
+                }
+                else
+                {
+                    CreateOnlineRoomCodeEntryPanel(GameObject.Find("Canvas"));
+                    if (onlineRoomCodeEntryPanel != null)
+                        onlineRoomCodeEntryPanel.SetActive(true);
+                }
+                UpdateStepIndicator("Join Game - Enter Room Code");
+                break;
+
+            case MenuStep.OnlineLobbyBrowser:
+                if (onlineLobbyBrowserPanel != null)
+                {
+                    onlineLobbyBrowserPanel.SetActive(true);
+                    Debug.Log("  ✅ Online lobby browser panel shown");
+                }
+                else
+                {
+                    CreateOnlineLobbyBrowserPanel(GameObject.Find("Canvas"));
+                    if (onlineLobbyBrowserPanel != null)
+                        onlineLobbyBrowserPanel.SetActive(true);
+                }
+                UpdateStepIndicator("Browse Public Games");
+                break;
+
+            case MenuStep.OnlineMatchmaking:
+                if (onlineMatchmakingPanel != null)
+                {
+                    onlineMatchmakingPanel.SetActive(true);
+                    Debug.Log("  ✅ Online matchmaking panel shown");
+                }
+                else
+                {
+                    CreateOnlineMatchmakingPanel(GameObject.Find("Canvas"));
+                    if (onlineMatchmakingPanel != null)
+                        onlineMatchmakingPanel.SetActive(true);
+                }
+                UpdateStepIndicator("Find Match - Set Preferences");
+                break;
+
+            case MenuStep.OnlineFriendsList:
+                if (onlineFriendsListPanel != null)
+                {
+                    onlineFriendsListPanel.SetActive(true);
+                    Debug.Log("  ✅ Online friends list panel shown");
+                }
+                else
+                {
+                    CreateOnlineFriendsListPanel(GameObject.Find("Canvas"));
+                    if (onlineFriendsListPanel != null)
+                        onlineFriendsListPanel.SetActive(true);
+                }
+                UpdateStepIndicator("Friends - Invite or Join");
+                break;
+
+            case MenuStep.OnlineWaitingRoom:
+                if (onlineWaitingRoomPanel != null)
+                {
+                    onlineWaitingRoomPanel.SetActive(true);
+                    Debug.Log("  ✅ Online waiting room panel shown");
+                }
+                else
+                {
+                    CreateOnlineWaitingRoomPanel(GameObject.Find("Canvas"));
+                    if (onlineWaitingRoomPanel != null)
+                        onlineWaitingRoomPanel.SetActive(true);
+                }
+                UpdateStepIndicator("Waiting for Players...");
                 break;
         }
         
@@ -2737,17 +3243,136 @@ public class MainMenuController : MonoBehaviour
     public void StartEnhancedFlow()
     {
         Debug.Log("🚀 MainMenuController: Starting enhanced menu flow");
-        
+
         // Initialize configuration with clean defaults
         currentConfig = new GameConfiguration();
         hasSelectedAICount = false;
         hasSelectedBoardSize = false;
-        
+
         Debug.Log($"🚀 Initialized clean state - aiPlayerCount={currentConfig.aiPlayerCount}, hasSelectedAICount={hasSelectedAICount}, hasSelectedBoardSize={hasSelectedBoardSize}");
-        
+
         ShowStep(MenuStep.PlayerCount);
     }
-    
+
+    /// <summary>
+    /// Start online multiplayer flow - connects to server and shows online mode selection
+    /// </summary>
+    public void StartOnlineMultiplayerFlow()
+    {
+        Debug.Log("🌐 MainMenuController: Starting online multiplayer flow");
+
+        // Initialize configuration with online mode
+        isOnlineMode = true;
+        currentConfig = new GameConfiguration();
+        hasSelectedAICount = false;
+        hasSelectedBoardSize = false;
+
+        // Check if NetworkManager exists
+        if (NetworkManager.Instance == null)
+        {
+            Debug.LogError("❌ NetworkManager not found! Cannot start online mode.");
+            ShowConnectionErrorDialog("NetworkManager not found. Please ensure the NetworkManager prefab is in the scene.", false);
+            return;
+        }
+
+        // Check if already connected
+        if (NetworkManager.Instance.IsConnected)
+        {
+            Debug.Log("✅ Already connected to server, showing online mode selection");
+            ShowStep(MenuStep.OnlineModeSelection);
+            return;
+        }
+
+        // Show connection panel and attempt to connect
+        ShowStep(MenuStep.OnlineConnection);
+        ConnectToServer();
+    }
+
+    /// <summary>
+    /// Connect to the multiplayer server
+    /// </summary>
+    private void ConnectToServer()
+    {
+        if (isConnectingToServer)
+        {
+            Debug.LogWarning("⚠️ Already connecting to server...");
+            return;
+        }
+
+        isConnectingToServer = true;
+        Debug.Log("🔌 Attempting to connect to server...");
+
+        // Subscribe to connection events
+        NetworkManager.Instance.OnConnectionStateChanged += HandleConnectionStateChanged;
+        NetworkManager.Instance.OnConnectionError += HandleConnectionError;
+
+        // Auto-generate player name if not set
+        string playerName = "Player_" + UnityEngine.Random.Range(1000, 9999);
+        NetworkManager.Instance.PlayerName = playerName;
+
+        // Attempt connection (NetworkManager uses its configured server URL)
+        NetworkManager.Instance.ConnectToServer();
+    }
+
+    /// <summary>
+    /// Handle connection state changes
+    /// </summary>
+    private void HandleConnectionStateChanged(bool isConnected)
+    {
+        isConnectingToServer = false;
+
+        if (isConnected)
+        {
+            Debug.Log("✅ Successfully connected to server!");
+
+            // Unsubscribe from events
+            NetworkManager.Instance.OnConnectionStateChanged -= HandleConnectionStateChanged;
+            NetworkManager.Instance.OnConnectionError -= HandleConnectionError;
+
+            // Show online mode selection
+            ShowStep(MenuStep.OnlineModeSelection);
+        }
+    }
+
+    /// <summary>
+    /// Handle connection errors
+    /// </summary>
+    private void HandleConnectionError(string errorMessage)
+    {
+        isConnectingToServer = false;
+
+        Debug.LogError($"❌ Connection error: {errorMessage}");
+
+        // Unsubscribe from events
+        NetworkManager.Instance.OnConnectionStateChanged -= HandleConnectionStateChanged;
+        NetworkManager.Instance.OnConnectionError -= HandleConnectionError;
+
+        // Show error dialog with retry and offline options
+        ShowConnectionErrorDialog(errorMessage, true);
+    }
+
+    /// <summary>
+    /// Show connection error dialog with retry and offline mode options
+    /// </summary>
+    private void ShowConnectionErrorDialog(string errorMessage, bool allowRetry)
+    {
+        // For now, use Debug.LogError and return to main menu
+        // TODO: Create a proper error dialog UI
+        Debug.LogError($"❌ Connection failed: {errorMessage}");
+
+        // Show dialog with options (simplified version for now)
+        string dialogMessage = $"Unable to Connect to Server\n\n{errorMessage}\n\nPlease check your internet connection.";
+        Debug.LogWarning(dialogMessage);
+
+        // Return to main menu
+        isOnlineMode = false;
+        ShowStep(MenuStep.MainMenu);
+
+        // TODO: Implement proper error dialog with:
+        // - Retry button → ConnectToServer()
+        // - Play Offline button → Return to main menu
+    }
+
     /// <summary>
     /// Debug UI state for troubleshooting
     /// </summary>
