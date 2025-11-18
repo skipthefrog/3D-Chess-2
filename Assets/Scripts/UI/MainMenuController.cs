@@ -2051,15 +2051,15 @@ public class MainMenuController : MonoBehaviour
                     new Vector2(0, 0.85f), new Vector2(1, 0.95f), 28);
 
         // Room code display
-        GameObject roomCodeTextObj = CreateUIText("RoomCodeText", "Room Code: Loading...", onlineWaitingRoomPanel,
-                                                  new Vector2(0, 0.72f), new Vector2(1, 0.85f), 24);
+        CreateUIText("RoomCodeText", "Room Code: Loading...", onlineWaitingRoomPanel,
+                    new Vector2(0, 0.72f), new Vector2(1, 0.85f), 24);
 
         // Player list placeholder
         CreateUIText("PlayersLabel", "Players in room:", onlineWaitingRoomPanel,
                     new Vector2(0.1f, 0.6f), new Vector2(0.9f, 0.72f), 18);
 
-        GameObject playersTextObj = CreateUIText("PlayersText", "• You\n• Waiting for opponents...", onlineWaitingRoomPanel,
-                                                 new Vector2(0.1f, 0.3f), new Vector2(0.9f, 0.6f), 16);
+        CreateUIText("PlayersText", "• You\n• Waiting for opponents...", onlineWaitingRoomPanel,
+                    new Vector2(0.1f, 0.3f), new Vector2(0.9f, 0.6f), 16);
 
         // Start Game button (host only)
         CreateUIButton("StartGameButton", "Start Game", onlineWaitingRoomPanel,
@@ -2133,8 +2133,11 @@ public class MainMenuController : MonoBehaviour
         currentConfig.isOnlineGame = true;
         currentConfig.isPublicGame = isPublicGame;
 
+        // Auto-generate player name
+        string playerName = "Player_" + UnityEngine.Random.Range(1000, 9999);
+
         // Create room via NetworkManager
-        NetworkManager.Instance.CreateRoom(NetworkManager.Instance.PlayerName, currentConfig);
+        NetworkManager.Instance.CreateRoom(playerName, currentConfig);
 
         // Subscribe to room created event
         NetworkManager.Instance.OnRoomCreated += HandleRoomCreated;
@@ -2150,8 +2153,11 @@ public class MainMenuController : MonoBehaviour
     {
         Debug.Log($"🚪 Joining online room: {roomCode}");
 
+        // Auto-generate player name
+        string playerName = "Player_" + UnityEngine.Random.Range(1000, 9999);
+
         // Join room via NetworkManager
-        NetworkManager.Instance.JoinRoom(roomCode, NetworkManager.Instance.PlayerName);
+        NetworkManager.Instance.JoinRoom(roomCode, playerName);
 
         // Subscribe to room joined event
         NetworkManager.Instance.OnRoomJoined += HandleRoomJoined;
@@ -2339,7 +2345,67 @@ public class MainMenuController : MonoBehaviour
         
         return button;
     }
-    
+
+    /// <summary>
+    /// Helper method to create UI input field
+    /// </summary>
+    private GameObject CreateUIInputField(string name, string placeholder, GameObject parent, Vector2 anchorMin, Vector2 anchorMax)
+    {
+        GameObject inputObj = new GameObject(name);
+        inputObj.transform.SetParent(parent.transform, false);
+
+        RectTransform rect = inputObj.AddComponent<RectTransform>();
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.sizeDelta = Vector2.zero;
+
+        Image image = inputObj.AddComponent<Image>();
+        image.color = new Color(0.3f, 0.3f, 0.3f, 1f);
+
+        GameObject textArea = new GameObject("TextArea");
+        textArea.transform.SetParent(inputObj.transform, false);
+        RectTransform textAreaRect = textArea.AddComponent<RectTransform>();
+        textAreaRect.anchorMin = Vector2.zero;
+        textAreaRect.anchorMax = Vector2.one;
+        textAreaRect.offsetMin = new Vector2(10, 0);
+        textAreaRect.offsetMax = new Vector2(-10, 0);
+
+        GameObject text = new GameObject("Text");
+        text.transform.SetParent(textArea.transform, false);
+        RectTransform textRect = text.AddComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = Vector2.zero;
+        textRect.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI textComponent = text.AddComponent<TextMeshProUGUI>();
+        textComponent.fontSize = 20;
+        textComponent.color = Color.white;
+        textComponent.alignment = TextAlignmentOptions.Center;
+
+        GameObject placeholderObj = new GameObject("Placeholder");
+        placeholderObj.transform.SetParent(textArea.transform, false);
+        RectTransform placeholderRect = placeholderObj.AddComponent<RectTransform>();
+        placeholderRect.anchorMin = Vector2.zero;
+        placeholderRect.anchorMax = Vector2.one;
+        placeholderRect.offsetMin = Vector2.zero;
+        placeholderRect.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI placeholderText = placeholderObj.AddComponent<TextMeshProUGUI>();
+        placeholderText.text = placeholder;
+        placeholderText.fontSize = 20;
+        placeholderText.color = new Color(0.7f, 0.7f, 0.7f, 0.5f);
+        placeholderText.fontStyle = FontStyles.Italic;
+        placeholderText.alignment = TextAlignmentOptions.Center;
+
+        TMP_InputField inputField = inputObj.AddComponent<TMP_InputField>();
+        inputField.textViewport = textAreaRect;
+        inputField.textComponent = textComponent;
+        inputField.placeholder = placeholderText;
+
+        return inputObj;
+    }
+
     /// <summary>
     /// Helper method to create UI button with custom chess piece colors
     /// </summary>
@@ -3305,10 +3371,6 @@ public class MainMenuController : MonoBehaviour
         // Subscribe to connection events
         NetworkManager.Instance.OnConnectionStateChanged += HandleConnectionStateChanged;
         NetworkManager.Instance.OnConnectionError += HandleConnectionError;
-
-        // Auto-generate player name if not set
-        string playerName = "Player_" + UnityEngine.Random.Range(1000, 9999);
-        NetworkManager.Instance.PlayerName = playerName;
 
         // Attempt connection (NetworkManager uses its configured server URL)
         NetworkManager.Instance.ConnectToServer();
