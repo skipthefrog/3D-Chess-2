@@ -19,7 +19,7 @@ public class NetworkManager : MonoBehaviour
 {
     [Header("Server Configuration")]
     [SerializeField] private string serverUrl = "http://localhost:3000";
-    [SerializeField] private bool useProductionUrl = true;
+    [SerializeField] private bool useProductionUrl = false;  // Set to false for local development
     [SerializeField] private string productionUrl = "https://928fb741c6db.ngrok-free.app"; // Current ngrok tunnel
     [SerializeField] private bool autoConnect = false;
     [SerializeField] private float connectionTimeout = 10f;
