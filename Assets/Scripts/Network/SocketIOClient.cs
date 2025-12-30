@@ -218,7 +218,11 @@ namespace ChessNetwork
 
                 using (UnityWebRequest request = UnityWebRequest.Get(pollUrl))
                 {
+                    #if UNITY_WEBGL && !UNITY_EDITOR
+                    request.timeout = 30; // WebGL: Shorter timeout to avoid browser issues
+                    #else
                     request.timeout = (int)pingInterval + 5; // Timeout slightly longer than ping interval
+                    #endif
                     yield return request.SendWebRequest();
 
                     if (request.result == UnityWebRequest.Result.Success)

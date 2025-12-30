@@ -23,7 +23,12 @@ public class NetworkManager : MonoBehaviour
     [SerializeField] private string productionUrl = "https://928fb741c6db.ngrok-free.app"; // Current ngrok tunnel
     [SerializeField] private bool autoConnect = false;
     [SerializeField] private float connectionTimeout = 10f;
-    [SerializeField] private float reconnectDelay = 5f;
+
+    #if UNITY_WEBGL && !UNITY_EDITOR
+    [SerializeField] private float reconnectDelay = 2f;  // WebGL: Faster reconnection attempts
+    #else
+    [SerializeField] private float reconnectDelay = 5f;  // Standalone: Standard delay
+    #endif
     
     [Header("Debug Settings")]
     [SerializeField] private bool enableDebugLogging = true;
@@ -53,7 +58,12 @@ public class NetworkManager : MonoBehaviour
     private float lastHeartbeat;
     private bool isReconnecting = false;
     private int reconnectAttempts = 0;
-    private const int maxReconnectAttempts = 5;
+
+    #if UNITY_WEBGL && !UNITY_EDITOR
+    private const int maxReconnectAttempts = 10;  // WebGL: More attempts due to browser restrictions
+    #else
+    private const int maxReconnectAttempts = 5;   // Standalone: Standard attempts
+    #endif
     
     #region Events
     
@@ -170,13 +180,49 @@ public class NetworkManager : MonoBehaviour
     /// </summary>
     private string DetermineServerUrl()
     {
+        #if UNITY_WEBGL && !UNITY_EDITOR
+        // WebGL: Try to auto-detect server from current browser URL
+        string currentUrl = Application.absoluteURL;
+        if (!string.IsNullOrEmpty(currentUrl))
+        {
+            try
+            {
+                Uri uri = new Uri(currentUrl);
+                string webglServerUrl = $"{uri.Scheme}://{uri.Host}:3000";
+
+                if (enableDebugLogging)
+                    Debug.Log($"🌐 WebGL: Auto-detected server URL from browser: {webglServerUrl}");
+
+                return webglServerUrl;
+            }
+            catch (Exception e)
+            {
+                if (enableDebugLogging)
+                    Debug.LogWarning($"⚠️ WebGL: Failed to parse URL: {e.Message}");
+            }
+        }
+
+        // WebGL fallback: Use production URL if set, otherwise localhost
+        if (useProductionUrl && !string.IsNullOrEmpty(productionUrl))
+        {
+            if (enableDebugLogging)
+                Debug.Log($"🌐 WebGL: Using configured production URL: {productionUrl}");
+            return productionUrl;
+        }
+
+        if (enableDebugLogging)
+            Debug.Log($"🌐 WebGL: Using default server URL: {serverUrl}");
+        return serverUrl;
+
+        #else
+        // Standalone platforms: Use original logic
         if (useProductionUrl && !string.IsNullOrEmpty(productionUrl))
         {
             if (enableDebugLogging)
                 Debug.Log($"🌐 Using production URL: {productionUrl}");
             return productionUrl;
         }
-        
+
         // Try to auto-detect ngrok tunnel or use localhost
         string detectedUrl = TryDetectNgrokUrl();
         if (!string.IsNullOrEmpty(detectedUrl))
@@ -185,10 +231,11 @@ public class NetworkManager : MonoBehaviour
                 Debug.Log($"🌐 Auto-detected ngrok URL: {detectedUrl}");
             return detectedUrl;
         }
-        
+
         if (enableDebugLogging)
             Debug.Log($"🌐 Using default localhost URL: {serverUrl}");
         return serverUrl;
+        #endif
     }
     
     /// <summary>
@@ -198,8 +245,26 @@ public class NetworkManager : MonoBehaviour
     {
         // In a real implementation, you might check environment variables or config files
         // For now, we'll provide a way to manually set the production URL
-        
-        // Check if there's a server config file that might contain the ngrok URL
+
+        #if UNITY_WEBGL && !UNITY_EDITOR
+        // WebGL: Use PlayerPrefs instead of File.IO (files not accessible in browser)
+        try
+        {
+            string configUrl = PlayerPrefs.GetString("ServerConfigUrl", "");
+            if (!string.IsNullOrEmpty(configUrl) && (configUrl.Contains("ngrok") || configUrl.StartsWith("http")))
+            {
+                if (enableDebugLogging)
+                    Debug.Log($"🌐 WebGL: Loaded server URL from PlayerPrefs: {configUrl}");
+                return configUrl;
+            }
+        }
+        catch (Exception e)
+        {
+            if (enableDebugLogging)
+                Debug.LogWarning($"⚠️ WebGL: Error reading server config from PlayerPrefs: {e.Message}");
+        }
+        #else
+        // Standalone: Use file system
         try
         {
             string configPath = Path.Combine(Application.persistentDataPath, "server_config.txt");
@@ -217,7 +282,8 @@ public class NetworkManager : MonoBehaviour
             if (enableDebugLogging)
                 Debug.LogWarning($"⚠️ Error reading server config: {e.Message}");
         }
-        
+        #endif
+
         return null;
     }
     
@@ -1072,7 +1138,92 @@ public class NetworkManager : MonoBehaviour
         // Start the progressive matchmaking simulation
         StartCoroutine(SimulateProgressiveMatchmaking(preferences));
     }
-    
+
+    /// <summary>
+    /// Join matchmaking queue for an existing room (auto-fill mode)
+    /// </summary>
+    public void JoinMatchmakingForRoom(string roomCode, GameConfiguration config, int timerSeconds)
+    {
+        if (!IsConnected)
+        {
+            OnRoomError?.Invoke("Not connected to server");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(roomCode))
+        {
+            OnRoomError?.Invoke("Room code is required for matchmaking");
+            return;
+        }
+
+        if (enableDebugLogging)
+            Debug.Log($"🎯 NetworkManager: Joining matchmaking for room {roomCode} with {timerSeconds}s timer");
+
+        // Convert board size enum to int
+        int boardSizeInt = config.boardSize switch
+        {
+            BoardSize.Small4x4x4 => 4,
+            BoardSize.Medium6x6x6 => 6,
+            BoardSize.Large8x8x8 => 8,
+            _ => 8
+        };
+
+        // Prepare matchmaking data
+        var matchmakingData = new
+        {
+            roomCode = roomCode,
+            preferences = new
+            {
+                boardSize = boardSizeInt,
+                playerCount = config.playerCount,
+                chaosMode = config.enableChaosMode,
+                timedPlay = config.enableTimedPlay,
+                timeLimit = config.timePerPlayerMinutes * 60, // Convert minutes to seconds
+                skillLevel = "any",
+                includeAI = true // Always allow AI fill-in for auto-matchmaking
+            },
+            timerSeconds = timerSeconds
+        };
+
+        string jsonData = JsonUtility.ToJson(matchmakingData);
+        socket.Emit("join_matchmaking_for_room", jsonData);
+
+        if (enableDebugLogging)
+            Debug.Log($"📤 Sent join_matchmaking_for_room event for room {roomCode}");
+
+        // Start a coroutine to simulate the matchmaking timer
+        StartCoroutine(SimulateMatchmakingTimer(timerSeconds));
+    }
+
+    /// <summary>
+    /// Simulate matchmaking timer countdown
+    /// </summary>
+    private System.Collections.IEnumerator SimulateMatchmakingTimer(int seconds)
+    {
+        float elapsed = 0f;
+        float duration = seconds;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            int remaining = Mathf.CeilToInt(duration - elapsed);
+
+            // Update progress every second
+            if (remaining != Mathf.CeilToInt(duration - (elapsed - Time.deltaTime)))
+            {
+                OnMatchmakingProgress?.Invoke($"Finding players... {remaining}s remaining");
+            }
+
+            yield return null;
+        }
+
+        // Timer expired
+        if (enableDebugLogging)
+            Debug.Log("⏱️ NetworkManager: Matchmaking timer expired - server will fill with AI");
+
+        OnMatchmakingProgress?.Invoke("Timer expired - filling with AI players...");
+    }
+
     /// <summary>
     /// Simulate progressive matchmaking with 30-second window
     /// </summary>
@@ -1319,11 +1470,21 @@ public class NetworkManager : MonoBehaviour
     {
         try
         {
+            #if UNITY_WEBGL && !UNITY_EDITOR
+            // WebGL: Save to PlayerPrefs (persistent in browser)
+            PlayerPrefs.SetString("ServerConfigUrl", url);
+            PlayerPrefs.Save();
+
+            if (enableDebugLogging)
+                Debug.Log($"🌐 WebGL: Server URL saved to PlayerPrefs: {url}");
+            #else
+            // Standalone: Save to file
             string configPath = Path.Combine(Application.persistentDataPath, "server_config.txt");
             File.WriteAllText(configPath, url);
-            
+
             if (enableDebugLogging)
-                Debug.Log($"🌐 NetworkManager: Server URL saved to config: {url}");
+                Debug.Log($"🌐 NetworkManager: Server URL saved to config file: {url}");
+            #endif
         }
         catch (Exception e)
         {

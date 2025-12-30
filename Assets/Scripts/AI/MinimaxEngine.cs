@@ -10,10 +10,19 @@ public class MinimaxEngine
     private const float POSITIVE_INFINITY = 99999f;
     private const float NEGATIVE_INFINITY = -99999f;
     private const float CHECKMATE_SCORE = 10000f;
-    
+
+    #if UNITY_WEBGL && !UNITY_EDITOR
+    private const int MAX_CACHE_ENTRIES = 1000;       // WebGL: Limited cache to conserve browser memory
+    private const float DEFAULT_TIME_LIMIT = 2.0f;   // WebGL: Shorter time limit to prevent browser freezing
+    private const int MAX_DEPTH_WEBGL = 3;           // WebGL: Limit search depth for performance
+    #else
+    private const int MAX_CACHE_ENTRIES = 5000;      // Standalone: Larger cache for better performance
+    private const float DEFAULT_TIME_LIMIT = 5.0f;   // Standalone: Standard time limit
+    #endif
+
     private int nodesEvaluated = 0;
     private bool enableDebugLogging = false;
-    
+
     // PERFORMANCE CACHE: Cache moves to avoid expensive recalculation
     private Dictionary<PieceColor, List<AIMove>> movesCache = new Dictionary<PieceColor, List<AIMove>>();
     private int lastBoardHash = 0;
@@ -34,8 +43,16 @@ public class MinimaxEngine
     /// <summary>
     /// Find the best move for the given player using minimax with alpha-beta pruning
     /// </summary>
-    public AIMove FindBestMove(PieceColor player, int depth, float timeLimit = 5.0f)
+    public AIMove FindBestMove(PieceColor player, int depth, float timeLimit = DEFAULT_TIME_LIMIT)
     {
+        #if UNITY_WEBGL && !UNITY_EDITOR
+        // WebGL: Enforce depth limit to prevent browser freezing
+        depth = Mathf.Min(depth, MAX_DEPTH_WEBGL);
+
+        if (enableDebugLogging)
+            Debug.Log($"MinimaxEngine (WebGL): Depth limited to {depth}, time limit: {timeLimit}s");
+        #endif
+
         nodesEvaluated = 0;
         float startTime = Time.time;
         
@@ -318,7 +335,17 @@ public class MinimaxEngine
         // DIAGNOSTIC: Summary logging
         Debug.Log($"🔍 MinimaxEngine.GetAllPossibleMoves: Found {piecesFound} {player} pieces, generated {moves.Count} total moves");
 
-        // Update cache
+        // Update cache with memory limit
+        #if UNITY_WEBGL && !UNITY_EDITOR
+        // WebGL: Limit cache size to prevent memory issues
+        if (movesCache.Count >= MAX_CACHE_ENTRIES / 2) // Clear when half-full to maintain headroom
+        {
+            movesCache.Clear();
+            if (enableDebugLogging)
+                Debug.Log("MinimaxEngine (WebGL): Cache cleared to conserve memory");
+        }
+        #endif
+
         movesCache[player] = new List<AIMove>(moves);
         lastBoardHash = currentBoardHash;
 

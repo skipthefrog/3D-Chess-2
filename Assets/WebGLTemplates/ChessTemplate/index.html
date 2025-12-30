@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Chess</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        #unity-container {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #unity-canvas {
+            background: #000;
+            cursor: default;
+            width: 100%;
+            height: 100%;
+        }
+
+        #unity-loading-bar {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            display: none;
+        }
+
+        #unity-logo {
+            width: 150px;
+            height: 150px;
+            background: url('Build/{{{ LOADER_FILENAME }}}.logo.png') no-repeat center;
+            background-size: contain;
+            margin-bottom: 30px;
+        }
+
+        #unity-progress-bar-empty {
+            width: 400px;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        #unity-progress-bar-full {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            border-radius: 12px;
+            transition: width 0.3s;
+        }
+
+        #unity-progress-text {
+            color: white;
+            font-size: 18px;
+            font-weight: 500;
+        }
+
+        #unity-warning {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ff9800;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            display: none;
+            max-width: 90%;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        #unity-footer {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: none;
+        }
+
+        #unity-fullscreen-button {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background 0.3s;
+        }
+
+        #unity-fullscreen-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .mobile-warning {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            text-align: center;
+            max-width: 500px;
+            display: none;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .mobile-warning h2 {
+            color: #1e3c72;
+            margin-bottom: 20px;
+        }
+
+        .mobile-warning p {
+            color: #666;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div id="unity-container">
+        <canvas id="unity-canvas" tabindex="-1"></canvas>
+        <div id="unity-loading-bar">
+            <div id="unity-logo"></div>
+            <div id="unity-progress-bar-empty">
+                <div id="unity-progress-bar-full"></div>
+            </div>
+            <div id="unity-progress-text">Loading 3D Chess...</div>
+        </div>
+        <div id="unity-warning"></div>
+        <div id="unity-footer">
+            <button id="unity-fullscreen-button">Fullscreen</button>
+        </div>
+    </div>
+
+    <div class="mobile-warning" id="mobile-warning">
+        <h2>Desktop Required</h2>
+        <p>3D Chess requires a desktop browser for the best experience. Please visit this page on a computer with Chrome, Firefox, Safari, or Edge.</p>
+    </div>
+
+    <script>
+        // Detect mobile devices
+        var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile) {
+            document.getElementById('mobile-warning').style.display = 'block';
+            document.getElementById('unity-container').style.display = 'none';
+        } else {
+            // Show loading bar
+            var loadingBar = document.getElementById('unity-loading-bar');
+            loadingBar.style.display = 'block';
+
+            var buildUrl = "Build";
+            var loaderUrl = buildUrl + "/{{{ LOADER_FILENAME }}}";
+            var config = {
+                dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+                frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+                codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+#if MEMORY_FILENAME
+                memoryUrl: buildUrl + "/{{{ MEMORY_FILENAME }}}",
+#endif
+#if SYMBOLS_FILENAME
+                symbolsUrl: buildUrl + "/{{{ SYMBOLS_FILENAME }}}",
+#endif
+                streamingAssetsUrl: "StreamingAssets",
+                companyName: "{{{ COMPANY_NAME }}}",
+                productName: "{{{ PRODUCT_NAME }}}",
+                productVersion: "{{{ PRODUCT_VERSION }}}",
+                showBanner: function(msg, type) {
+                    var warningBanner = document.getElementById('unity-warning');
+                    warningBanner.innerHTML = msg;
+                    warningBanner.style.display = 'block';
+                    if (type === 'error') {
+                        warningBanner.style.background = '#f44336';
+                    } else if (type === 'warning') {
+                        warningBanner.style.background = '#ff9800';
+                    }
+                }
+            };
+
+            var canvas = document.getElementById('unity-canvas');
+            var progressBarFull = document.getElementById('unity-progress-bar-full');
+            var progressText = document.getElementById('unity-progress-text');
+
+            var script = document.createElement('script');
+            script.src = loaderUrl;
+            script.onload = function() {
+                createUnityInstance(canvas, config, function(progress) {
+                    // Update progress bar
+                    progressBarFull.style.width = (progress * 100) + '%';
+                    progressText.textContent = 'Loading... ' + Math.round(progress * 100) + '%';
+                }).then(function(unityInstance) {
+                    // Loading complete
+                    loadingBar.style.display = 'none';
+                    document.getElementById('unity-footer').style.display = 'block';
+
+                    // Fullscreen button
+                    document.getElementById('unity-fullscreen-button').onclick = function() {
+                        unityInstance.SetFullscreen(1);
+                    };
+                }).catch(function(message) {
+                    alert('Failed to load 3D Chess: ' + message);
+                });
+            };
+            document.body.appendChild(script);
+        }
+    </script>
+</body>
+</html>

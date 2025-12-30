@@ -18,6 +18,7 @@ public enum MenuStep
     OnlineModeSelection,   // Choose Create/Join/Matchmaking/Friends
     OnlineGameCreation,    // Create game settings (reuses existing panels)
     OnlinePublicPrivate,   // Select public or private game
+    OnlineMatchmakingChoice, // Choose room code only or auto-matchmaking
     OnlineRoomCodeEntry,   // Enter room code to join
     OnlineLobbyBrowser,    // Browse public games
     OnlineMatchmaking,     // Matchmaking preferences
@@ -87,6 +88,7 @@ public class MainMenuController : MonoBehaviour
     public GameObject onlineConnectionPanel;
     public GameObject onlineModeSelectionPanel;
     public GameObject onlinePublicPrivatePanel;
+    public GameObject onlineMatchmakingChoicePanel;
     public GameObject onlineRoomCodeEntryPanel;
     public GameObject onlineLobbyBrowserPanel;
     public GameObject onlineMatchmakingPanel;
@@ -131,6 +133,8 @@ public class MainMenuController : MonoBehaviour
     private bool isPublicGame = false;
     private string enteredRoomCode = "";
     private bool hasSelectedBoardSize = false; // Track if user has explicitly selected board size
+    private bool useAutoMatchmaking = false; // Use auto-matchmaking vs room code only
+    private int matchmakingTimerSeconds = 60; // Timer for auto-matchmaking (default 60s)
     
     private void Start()
     {
@@ -1945,30 +1949,30 @@ public class MainMenuController : MonoBehaviour
 
         // Title
         CreateUIText("Title", "Create Game", onlinePublicPrivatePanel,
-                    new Vector2(0, 0.8f), new Vector2(1, 0.95f), 28);
+                    new Vector2(0, 0.85f), new Vector2(1, 0.95f), 28);
 
         // Instructions
         CreateUIText("Instructions", "Would you like to create a public or private game?",
-                    onlinePublicPrivatePanel, new Vector2(0.05f, 0.68f), new Vector2(0.95f, 0.8f), 18);
+                    onlinePublicPrivatePanel, new Vector2(0.05f, 0.75f), new Vector2(0.95f, 0.85f), 16);
 
         // Public game button
-        CreateUIButton("PublicGameButton", "Public Game\n\nAnyone can find and join this game in the lobby",
+        CreateUIButton("PublicGameButton", "Public Game\n\nVisible in lobby browser",
                       onlinePublicPrivatePanel,
-                      new Vector2(0.1f, 0.42f), new Vector2(0.9f, 0.65f),
+                      new Vector2(0.1f, 0.48f), new Vector2(0.9f, 0.72f),
                       () => {
                           Debug.Log("🌍 Public game selected");
                           isPublicGame = true;
-                          CreateOnlineRoom();
+                          ShowStep(MenuStep.OnlineMatchmakingChoice);
                       });
 
         // Private game button
-        CreateUIButton("PrivateGameButton", "Private Game\n\nOnly players with the room code can join",
+        CreateUIButton("PrivateGameButton", "Private Game\n\nJoin by room code only",
                       onlinePublicPrivatePanel,
-                      new Vector2(0.1f, 0.16f), new Vector2(0.9f, 0.39f),
+                      new Vector2(0.1f, 0.22f), new Vector2(0.9f, 0.46f),
                       () => {
                           Debug.Log("🔒 Private game selected");
                           isPublicGame = false;
-                          CreateOnlineRoom();
+                          ShowStep(MenuStep.OnlineMatchmakingChoice);
                       });
 
         // Back button
@@ -1977,6 +1981,135 @@ public class MainMenuController : MonoBehaviour
                       () => ShowStep(MenuStep.BoardSize));
 
         Debug.Log("🎨 MainMenuController: Public/Private selection panel created");
+    }
+
+    /// <summary>
+    /// Create online matchmaking choice panel (room code only vs auto-matchmaking)
+    /// </summary>
+    private void CreateOnlineMatchmakingChoicePanel(GameObject parent)
+    {
+        onlineMatchmakingChoicePanel = new GameObject("OnlineMatchmakingChoicePanel");
+        onlineMatchmakingChoicePanel.transform.SetParent(parent.transform, false);
+
+        RectTransform panelRect = onlineMatchmakingChoicePanel.AddComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.2f, 0.2f);
+        panelRect.anchorMax = new Vector2(0.8f, 0.8f);
+        panelRect.sizeDelta = Vector2.zero;
+
+        // Title
+        CreateUIText("Title", "How Should Players Join?", onlineMatchmakingChoicePanel,
+                    new Vector2(0, 0.85f), new Vector2(1, 0.95f), 28);
+
+        // Instructions
+        CreateUIText("Instructions", "Choose how other players will join your game:",
+                    onlineMatchmakingChoicePanel, new Vector2(0.05f, 0.76f), new Vector2(0.95f, 0.85f), 18);
+
+        // Room Code Only button
+        CreateUIButton("RoomCodeOnlyButton", "Room Code Only\n\nShare a code with friends to join manually",
+                      onlineMatchmakingChoicePanel,
+                      new Vector2(0.1f, 0.54f), new Vector2(0.9f, 0.73f),
+                      () => {
+                          Debug.Log("🔑 Room code only selected");
+                          useAutoMatchmaking = false;
+                          CreateOnlineRoom();
+                      });
+
+        // Auto-Matchmaking button
+        CreateUIButton("AutoMatchmakingButton", "Auto-Fill with Matchmaking\n\nAutomatically find players or fill with AI",
+                      onlineMatchmakingChoicePanel,
+                      new Vector2(0.1f, 0.32f), new Vector2(0.9f, 0.51f),
+                      () => {
+                          Debug.Log("🎯 Auto-matchmaking selected - showing timer options");
+                          ShowMatchmakingTimerOptions();
+                      });
+
+        // Back button
+        CreateUIButton("BackButton", "Back", onlineMatchmakingChoicePanel,
+                      new Vector2(0.3f, 0.03f), new Vector2(0.7f, 0.12f),
+                      () => ShowStep(MenuStep.OnlinePublicPrivate));
+
+        Debug.Log("🎨 MainMenuController: Matchmaking choice panel created");
+    }
+
+    /// <summary>
+    /// Show timer selection options for auto-matchmaking
+    /// </summary>
+    private void ShowMatchmakingTimerOptions()
+    {
+        // Hide the main choice buttons and show timer selection instead
+        if (onlineMatchmakingChoicePanel == null) return;
+
+        // Clear existing content
+        foreach (Transform child in onlineMatchmakingChoicePanel.transform)
+        {
+            if (child.name != "Title")
+                Destroy(child.gameObject);
+        }
+
+        // New instructions
+        CreateUIText("Instructions", "How long should the system search for players?",
+                    onlineMatchmakingChoicePanel, new Vector2(0.05f, 0.76f), new Vector2(0.95f, 0.85f), 18);
+
+        CreateUIText("TimerInfo", "When time expires, remaining slots will be filled with AI players.",
+                    onlineMatchmakingChoicePanel, new Vector2(0.1f, 0.68f), new Vector2(0.9f, 0.76f), 14);
+
+        // Timer buttons
+        CreateUIButton("Timer30s", "30 seconds", onlineMatchmakingChoicePanel,
+                      new Vector2(0.1f, 0.54f), new Vector2(0.48f, 0.65f),
+                      () => { matchmakingTimerSeconds = 30; UpdateTimerSelection(); });
+
+        CreateUIButton("Timer60s", "60 seconds", onlineMatchmakingChoicePanel,
+                      new Vector2(0.52f, 0.54f), new Vector2(0.9f, 0.65f),
+                      () => { matchmakingTimerSeconds = 60; UpdateTimerSelection(); });
+
+        CreateUIButton("Timer90s", "90 seconds", onlineMatchmakingChoicePanel,
+                      new Vector2(0.1f, 0.41f), new Vector2(0.48f, 0.52f),
+                      () => { matchmakingTimerSeconds = 90; UpdateTimerSelection(); });
+
+        CreateUIButton("Timer120s", "120 seconds", onlineMatchmakingChoicePanel,
+                      new Vector2(0.52f, 0.41f), new Vector2(0.9f, 0.52f),
+                      () => { matchmakingTimerSeconds = 120; UpdateTimerSelection(); });
+
+        // Selected timer display
+        CreateUIText("SelectedTimer", $"Selected: {matchmakingTimerSeconds} seconds", onlineMatchmakingChoicePanel,
+                    new Vector2(0.2f, 0.32f), new Vector2(0.8f, 0.39f), 16);
+
+        // Start matchmaking button
+        CreateUIButton("StartMatchmakingButton", "Start with Auto-Matchmaking", onlineMatchmakingChoicePanel,
+                      new Vector2(0.15f, 0.18f), new Vector2(0.85f, 0.3f),
+                      () => {
+                          Debug.Log($"🎯 Starting auto-matchmaking with {matchmakingTimerSeconds}s timer");
+                          useAutoMatchmaking = true;
+                          CreateOnlineRoom();
+                      });
+
+        // Back button
+        CreateUIButton("BackButton", "Back", onlineMatchmakingChoicePanel,
+                      new Vector2(0.3f, 0.03f), new Vector2(0.7f, 0.14f),
+                      () => {
+                          // Recreate the main matchmaking choice panel
+                          Destroy(onlineMatchmakingChoicePanel);
+                          CreateOnlineMatchmakingChoicePanel(GameObject.Find("Canvas"));
+                          onlineMatchmakingChoicePanel.SetActive(true);
+                      });
+    }
+
+    /// <summary>
+    /// Update the timer selection display
+    /// </summary>
+    private void UpdateTimerSelection()
+    {
+        // Find and update the selected timer text
+        Transform selectedTimerText = onlineMatchmakingChoicePanel.transform.Find("SelectedTimer");
+        if (selectedTimerText != null)
+        {
+            TextMeshProUGUI textComponent = selectedTimerText.GetComponent<TextMeshProUGUI>();
+            if (textComponent != null)
+            {
+                textComponent.text = $"Selected: {matchmakingTimerSeconds} seconds";
+                Debug.Log($"⏱️ Timer updated to {matchmakingTimerSeconds}s");
+            }
+        }
     }
 
     /// <summary>
@@ -2127,7 +2260,7 @@ public class MainMenuController : MonoBehaviour
     /// </summary>
     private void CreateOnlineRoom()
     {
-        Debug.Log($"🏠 Creating online room - Public: {isPublicGame}");
+        Debug.Log($"🏠 Creating online room - Public: {isPublicGame}, Auto-Matchmaking: {useAutoMatchmaking}");
 
         // Set online mode flag in configuration
         currentConfig.isOnlineGame = true;
@@ -2141,6 +2274,14 @@ public class MainMenuController : MonoBehaviour
 
         // Subscribe to room created event
         NetworkManager.Instance.OnRoomCreated += HandleRoomCreated;
+
+        // If auto-matchmaking is enabled, join matchmaking queue
+        if (useAutoMatchmaking)
+        {
+            Debug.Log($"🎯 Starting auto-matchmaking with {matchmakingTimerSeconds}s timer");
+            // Note: JoinMatchmakingForRoom will be called after room is created (in HandleRoomCreated)
+            // We pass the timer duration through a temporary variable
+        }
 
         // Show waiting room
         ShowStep(MenuStep.OnlineWaitingRoom);
@@ -2173,6 +2314,13 @@ public class MainMenuController : MonoBehaviour
     {
         Debug.Log($"✅ Room created! Code: {roomCode}, Color: {assignedColor}");
         NetworkManager.Instance.OnRoomCreated -= HandleRoomCreated;
+
+        // If auto-matchmaking is enabled, join the matchmaking queue
+        if (useAutoMatchmaking)
+        {
+            Debug.Log($"🎯 Joining matchmaking queue for room {roomCode} with {matchmakingTimerSeconds}s timer");
+            NetworkManager.Instance.JoinMatchmakingForRoom(roomCode, currentConfig, matchmakingTimerSeconds);
+        }
 
         // Update waiting room UI with room code
         // TODO: Update UI dynamically
@@ -2603,6 +2751,7 @@ public class MainMenuController : MonoBehaviour
         if (onlineConnectionPanel) { onlineConnectionPanel.SetActive(false); Debug.Log("  - Online connection panel hidden"); }
         if (onlineModeSelectionPanel) { onlineModeSelectionPanel.SetActive(false); Debug.Log("  - Online mode selection panel hidden"); }
         if (onlinePublicPrivatePanel) { onlinePublicPrivatePanel.SetActive(false); Debug.Log("  - Online public/private panel hidden"); }
+        if (onlineMatchmakingChoicePanel) { onlineMatchmakingChoicePanel.SetActive(false); Debug.Log("  - Online matchmaking choice panel hidden"); }
         if (onlineRoomCodeEntryPanel) { onlineRoomCodeEntryPanel.SetActive(false); Debug.Log("  - Online room code entry panel hidden"); }
         if (onlineLobbyBrowserPanel) { onlineLobbyBrowserPanel.SetActive(false); Debug.Log("  - Online lobby browser panel hidden"); }
         if (onlineMatchmakingPanel) { onlineMatchmakingPanel.SetActive(false); Debug.Log("  - Online matchmaking panel hidden"); }
@@ -2739,6 +2888,21 @@ public class MainMenuController : MonoBehaviour
                         onlinePublicPrivatePanel.SetActive(true);
                 }
                 UpdateStepIndicator("Create Game - Public or Private");
+                break;
+
+            case MenuStep.OnlineMatchmakingChoice:
+                if (onlineMatchmakingChoicePanel != null)
+                {
+                    onlineMatchmakingChoicePanel.SetActive(true);
+                    Debug.Log("  ✅ Online matchmaking choice panel shown");
+                }
+                else
+                {
+                    CreateOnlineMatchmakingChoicePanel(GameObject.Find("Canvas"));
+                    if (onlineMatchmakingChoicePanel != null)
+                        onlineMatchmakingChoicePanel.SetActive(true);
+                }
+                UpdateStepIndicator("How Should Players Join?");
                 break;
 
             case MenuStep.OnlineRoomCodeEntry:
@@ -2916,9 +3080,9 @@ public class MainMenuController : MonoBehaviour
         MenuStep nextStep = currentStep switch
         {
             MenuStep.MainMenu => MenuStep.PlayerCount,
-            MenuStep.PlayerCount => MenuStep.SideSelection,
+            MenuStep.PlayerCount => isOnlineMode ? MenuStep.BoardSize : MenuStep.SideSelection, // Skip side selection in online mode
             MenuStep.SideSelection => MenuStep.BoardSize,
-            MenuStep.BoardSize => MenuStep.FinalConfirmation,
+            MenuStep.BoardSize => isOnlineMode ? MenuStep.OnlinePublicPrivate : MenuStep.FinalConfirmation, // Online flow goes to public/private selection
             _ => currentStep
         };
 
@@ -3074,7 +3238,7 @@ public class MainMenuController : MonoBehaviour
         {
             MenuStep.PlayerCount => MenuStep.MainMenu,
             MenuStep.SideSelection => MenuStep.PlayerCount,
-            MenuStep.BoardSize => MenuStep.SideSelection,
+            MenuStep.BoardSize => isOnlineMode ? MenuStep.PlayerCount : MenuStep.SideSelection, // Skip side selection in online mode
             MenuStep.FinalConfirmation => MenuStep.BoardSize,
             _ => MenuStep.MainMenu
         };

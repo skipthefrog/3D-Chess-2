@@ -64,7 +64,27 @@ app.use(helmet({
     }
   }
 }));
-app.use(cors());
+
+// Enhanced CORS configuration for WebGL Unity builds
+const corsOptions = {
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+    'http://localhost:5500',       // Common local dev servers
+    'http://127.0.0.1:5500',
+    process.env.PRODUCTION_URL,    // Production domain from environment variable
+    // Add your deployment domains here:
+    // 'https://yourgame.com',
+    // 'https://yourusername.github.io',
+    // 'https://your-app.netlify.app',
+    // 'https://your-app.vercel.app',
+  ].filter(Boolean), // Remove undefined values
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Serve static files (web dashboard)
@@ -376,10 +396,10 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Socket.IO setup with enhanced configuration
+// Socket.IO setup with enhanced configuration for WebGL
 const io = socketIo(server, {
   cors: {
-    origin: "*",
+    origin: corsOptions.origin,  // Use same origins as Express CORS
     methods: ["GET", "POST"],
     credentials: true
   },
@@ -550,7 +570,11 @@ class GameServer {
       maxPlayers: config.playerCount,
       createdAt: new Date(),
       autoFillTimer: null,
-      lastPlayerJoinTime: new Date()
+      lastPlayerJoinTime: new Date(),
+      nextAvailableSlot: 1, // Track next available player position (0 is host)
+      matchmakingEnabled: false, // Whether auto-matchmaking is enabled
+      matchmakingTimerSeconds: 0, // How long to search for players
+      matchmakingTimerHandle: null // Handle for the matchmaking timer
     };
 
     logger.info(`🏠 Room object created with maxPlayers: ${room.maxPlayers} (from config.playerCount: ${config.playerCount})`);
@@ -560,6 +584,7 @@ class GameServer {
     const hostPlayer = {
       playerId: hostPlayerId,
       playerName,
+      position: 0, // Host is always position 0
       assignedColor: 'White',
       isHost: true,
       isReady: false,
@@ -601,10 +626,15 @@ class GameServer {
     }
     
     const assignedColor = availableColors[0];
-    
+
+    // Assign player to next available slot position
+    const position = room.nextAvailableSlot;
+    room.nextAvailableSlot++; // Increment for next player
+
     const player = {
       playerId,
       playerName,
+      position, // Sequential slot assignment
       assignedColor,
       isHost: false,
       isReady: false,
@@ -612,6 +642,8 @@ class GameServer {
     };
 
     room.players.set(playerId, player);
+
+    logger.info(`👤 Player ${playerName} assigned to position ${position} in room ${roomCode}`);
     room.lastPlayerJoinTime = new Date();
     
     // Update auto-fill timer based on new room status
@@ -665,6 +697,82 @@ class GameServer {
     }
 
     logger.info(`👋 Player intentionally left room ${roomCode}`);
+    return true;
+  }
+
+  // Fill remaining room slots with AI players
+  fillRoomWithAI(roomCode) {
+    const room = this.rooms.get(roomCode);
+    if (!room) {
+      logger.error(`❌ fillRoomWithAI: Room ${roomCode} not found`);
+      return false;
+    }
+
+    const currentPlayerCount = room.players.size;
+    const neededAI = room.maxPlayers - currentPlayerCount;
+
+    if (neededAI <= 0) {
+      logger.info(`🤖 fillRoomWithAI: Room ${roomCode} already full (${currentPlayerCount}/${room.maxPlayers})`);
+      return false;
+    }
+
+    logger.info(`🤖 fillRoomWithAI: Filling ${neededAI} slots with AI in room ${roomCode}`);
+
+    // Get available colors
+    const colors = this.getPlayerColors(room.maxPlayers);
+    const usedColors = new Set(Array.from(room.players.values()).map(p => p.assignedColor));
+
+    // Add AI players for remaining slots
+    for (let i = 0; i < neededAI; i++) {
+      const availableColors = colors.filter(color => !usedColors.has(color));
+      if (availableColors.length === 0) {
+        logger.error(`❌ No available colors for AI player ${i + 1}`);
+        break;
+      }
+
+      const assignedColor = availableColors[0];
+      usedColors.add(assignedColor);
+
+      // Get position from nextAvailableSlot
+      const position = room.nextAvailableSlot;
+      room.nextAvailableSlot++;
+
+      // Create AI player
+      const aiPlayerId = `ai_${roomCode}_${position}`;
+      const aiPlayer = {
+        playerId: aiPlayerId,
+        playerName: `AI Player ${position + 1}`,
+        position: position,
+        assignedColor: assignedColor,
+        isHost: false,
+        isReady: true, // AI is always ready
+        isAI: true,
+        aiDifficulty: room.gameConfig?.ai?.difficulty || 'medium',
+        socketId: null
+      };
+
+      room.players.set(aiPlayerId, aiPlayer);
+      logger.info(`🤖 Added AI player at position ${position} with color ${assignedColor}`);
+    }
+
+    logger.info(`✅ Room ${roomCode} filled with AI - Now ${room.players.size}/${room.maxPlayers} players`);
+
+    // Notify all players in the room
+    if (this.io) {
+      this.io.to(roomCode).emit('room_filled_with_ai', {
+        roomCode: roomCode,
+        currentPlayers: room.players.size,
+        maxPlayers: room.maxPlayers,
+        players: Array.from(room.players.values()).map(p => ({
+          playerId: p.playerId,
+          playerName: p.playerName,
+          position: p.position,
+          assignedColor: p.assignedColor,
+          isAI: p.isAI || false
+        }))
+      });
+    }
+
     return true;
   }
 
@@ -1536,6 +1644,57 @@ io.on('connection', (socket) => {
       
       if (callback) callback({ success: true });
       logger.info(`👋 Player left room: ${roomCode}`);
+    }
+  });
+
+  // Matchmaking for room handler (auto-fill mode)
+  socket.on('join_matchmaking_for_room', (data, callback) => {
+    try {
+      const { roomCode, preferences, timerSeconds } = data;
+
+      logger.info(`🎯 === JOIN MATCHMAKING FOR ROOM ===`);
+      logger.info(`🎯 Room Code: ${roomCode}`);
+      logger.info(`🎯 Timer: ${timerSeconds}s`);
+      logger.info(`🎯 Preferences:`, JSON.stringify(preferences, null, 2));
+
+      const room = gameServer.rooms.get(roomCode);
+      if (!room) {
+        throw new Error('Room not found');
+      }
+
+      // Enable matchmaking for this room
+      room.matchmakingEnabled = true;
+      room.matchmakingTimerSeconds = timerSeconds || 60;
+
+      logger.info(`🎯 Matchmaking enabled for room ${roomCode}`);
+      logger.info(`🎯 Will search for ${room.matchmakingTimerSeconds} seconds`);
+      logger.info(`🎯 Need ${room.maxPlayers - room.players.size} more players`);
+
+      // Start matchmaking timer
+      if (room.matchmakingTimerHandle) {
+        clearTimeout(room.matchmakingTimerHandle);
+      }
+
+      room.matchmakingTimerHandle = setTimeout(() => {
+        logger.info(`⏱️ Matchmaking timer expired for room ${roomCode}`);
+        gameServer.fillRoomWithAI(roomCode);
+      }, room.matchmakingTimerSeconds * 1000);
+
+      if (callback) callback({ success: true });
+
+      // Notify room that matchmaking has started
+      io.to(roomCode).emit('matchmaking_started', {
+        roomCode: roomCode,
+        timerSeconds: room.matchmakingTimerSeconds,
+        currentPlayers: room.players.size,
+        maxPlayers: room.maxPlayers
+      });
+
+      logger.info(`✅ Matchmaking started for room ${roomCode}`);
+
+    } catch (error) {
+      logger.error(`❌ Join matchmaking for room error: ${error.message}`);
+      if (callback) callback({ success: false, error: error.message });
     }
   });
 
