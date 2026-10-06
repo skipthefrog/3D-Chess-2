@@ -10,27 +10,27 @@ public class HowToPlayUI : MonoBehaviour
     private bool showing;
     private EmergencyChessBoard board;
     private bool autoShownThisGame;
-    private Vector2 scroll;
 
-    private const string Guide =
+    // Two columns so the whole guide fits on a phone screen without scrolling
+    private const string GuideLeft =
         "SETUP\n" +
-        "Tap a piece in your tray, then tap a dot on the board to place it. " +
-        "Tap \"Auto-place\" to place the rest for you. When every player is done, tap your \"Ready to Play\" button.\n\n" +
+        "Tap a piece in your tray, then a dot on the board. \"Auto-place\" places the rest for you. " +
+        "When everyone is done, tap your \"Ready to Play\" button.\n\n" +
         "MOVING\n" +
-        "Tap one of your pieces to see where it can go, then tap a dot. " +
-        "Pieces move in three dimensions: left-right, front-back, and up-down between levels.\n\n" +
-        "PIECES\n" +
-        "King: 1 step in any direction, including diagonals and up or down.\n" +
-        "Queen: any distance in a straight line or diagonal, in any direction.\n" +
-        "Rook: any distance straight along one axis, including straight up or down.\n" +
-        "Bishop: any distance diagonally, including diagonals that change level.\n" +
-        "Knight: an L shape (2 then 1) in any plane, jumping over pieces.\n" +
-        "Pawn: forward toward the far side of the cube; promotes on reaching it.\n\n" +
+        "Tap one of your pieces, then a dot. Pieces move left-right, front-back, and up-down between floors.\n\n" +
         "SEEING THE BOARD\n" +
-        "Drag to turn the view. Pinch to zoom. " +
-        "Use the Level buttons on the right to show one level at a time, and \"All\" to see the whole cube.\n\n" +
+        "Drag to turn. Pinch to zoom. The floor buttons on the right show one floor at a time.";
+
+    private const string GuideRight =
+        "PIECES\n" +
+        "King: 1 step any direction, including up or down.\n" +
+        "Queen: any distance, straight or diagonal.\n" +
+        "Rook: any distance along one axis.\n" +
+        "Bishop: any distance diagonally, across floors too.\n" +
+        "Knight: an L (2 then 1) in any plane; jumps.\n" +
+        "Pawn: forward to the far side, then promotes.\n\n" +
         "WINNING\n" +
-        "Checkmate the other King. A captured King knocks that player out.";
+        "Checkmate the other King. Lose your King and you're out.";
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Create()
@@ -76,8 +76,8 @@ public class HowToPlayUI : MonoBehaviour
         if (!showing)
         {
             // Sits just left of the level buttons
-            GUI.skin.button.fontSize = 18;
-            if (TouchGUI.Button(new Rect(ui.x - 150f, 20f, 50f, 40f), "?"))
+            // Top right, above the level buttons
+            if (TouchGUI.NeonButton(new Rect(ui.x - 82f, 16f, 72f, 44f), "?", NeonTheme.Yellow, NeonTheme.Pink, fontSize: 22))
             {
                 showing = true;
             }
@@ -87,25 +87,21 @@ public class HowToPlayUI : MonoBehaviour
 
         Rect full = new Rect(0, 0, ui.x, ui.y);
         TouchGUI.Block(full);
-        GUI.Box(full, "");
-        GUI.Box(full, "");
 
         float margin = 30f;
         Rect panel = new Rect(margin, 15f, ui.x - margin * 2, ui.y - 30f);
-        GUI.Box(panel, "");
+        NeonTheme.GUIPanel(panel, NeonTheme.Cyan, 0.96f);
 
-        GUIStyle title = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
-        GUI.Label(new Rect(panel.x, panel.y + 6f, panel.width, 30f), "How to Play", title);
+        GUI.Label(new Rect(panel.x, panel.y + 6f, panel.width, 30f), "HOW TO PLAY", NeonTheme.GUILabelStyle(NeonTheme.Lime, 22, true, TextAnchor.MiddleCenter));
 
-        GUIStyle body = new GUIStyle(GUI.skin.label) { fontSize = 13, wordWrap = true };
-        Rect view = new Rect(panel.x + 16f, panel.y + 40f, panel.width - 32f, panel.height - 95f);
-        float contentHeight = body.CalcHeight(new GUIContent(Guide), view.width - 20f);
-        scroll = GUI.BeginScrollView(view, scroll, new Rect(0, 0, view.width - 20f, contentHeight), false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
-        GUI.Label(new Rect(0, 0, view.width - 20f, contentHeight), Guide, body);
-        GUI.EndScrollView();
+        GUIStyle body = NeonTheme.GUILabelStyle(NeonTheme.White, 12, false, TextAnchor.UpperLeft);
+        float columnWidth = (panel.width - 48f) / 2f;
+        float top = panel.y + 40f;
+        float columnHeight = panel.height - 100f;
+        GUI.Label(new Rect(panel.x + 16f, top, columnWidth, columnHeight), GuideLeft, body);
+        GUI.Label(new Rect(panel.x + 32f + columnWidth, top, columnWidth, columnHeight), GuideRight, body);
 
-        GUI.skin.button.fontSize = 16;
-        if (GUI.Button(new Rect(panel.x + panel.width / 2f - 70f, panel.yMax - 50f, 140f, 40f), "Got it"))
+        if (NeonTheme.GUIButton(new Rect(panel.x + panel.width / 2f - 70f, panel.yMax - 52f, 140f, 42f), "Got it!", NeonTheme.Pink, NeonTheme.Cyan, false, 17))
         {
             showing = false;
         }

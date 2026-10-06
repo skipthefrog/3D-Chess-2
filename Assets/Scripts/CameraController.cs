@@ -134,7 +134,8 @@ public class CameraController : MonoBehaviour
         // on-screen buttons and status text.
         const float targetExtentX = 0.46f;
         const float targetExtentY = 0.38f;
-        float near = minDistance, far = maxDistance;
+        // Bigger boards (6x6x6, 8x8x8) need to sit further back than the default zoom limit
+        float near = minDistance, far = 150f;
         for (int i = 0; i < 20; i++)
         {
             distance = (near + far) * 0.5f;
@@ -152,6 +153,7 @@ public class CameraController : MonoBehaviour
             if (fits) far = distance; else near = distance;
         }
         distance = far;
+        maxDistance = Mathf.Max(35f, distance * 1.6f); // let players zoom out past the fitted view
         UpdateCameraPosition();
         string widest = ""; float widestExtent = 0f;
         for (int i = 0; i < corners.Count; i++)

@@ -124,14 +124,17 @@ public class LayerViewUI : MonoBehaviour
         GUI.skin.button.fontSize = 14;
 
         int levels = LevelCount;
-        float width = 80f;
+        float width = 72f;
         float gap = 4f;
         // Leave room at the bottom for the Menu button
-        float height = Mathf.Min(40f, (ui.y - 100f) / (levels + 1) - gap);
+        // Below the ? button; leave room at the bottom for the Menu button
+        float y = 76f;
+        float height = Mathf.Min(40f, (ui.y - y - 20f - 70f) / (levels + 1) - gap);
         float x = ui.x - width - 10f;
-        float y = 20f;
 
-        if (TouchGUI.Button(new Rect(x, y, width, height), selectedLevel < 0 ? "[All]" : "All"))
+        GUI.Label(new Rect(x, y, width, 18f), "Floors", NeonTheme.GUILabelStyle(NeonTheme.Cyan, 14, true, TextAnchor.MiddleCenter));
+        y += 20f;
+        if (TouchGUI.NeonButton(new Rect(x, y, width, height), "All", NeonTheme.Pink, NeonTheme.Cyan, outlined: selectedLevel >= 0, fontSize: 16))
         {
             ShowAll();
         }
@@ -139,12 +142,16 @@ public class LayerViewUI : MonoBehaviour
         for (int level = levels - 1; level >= 0; level--)
         {
             y += height + gap;
-            string label = selectedLevel == level ? $"[Level {level + 1}]" : $"Level {level + 1}";
-            if (TouchGUI.Button(new Rect(x, y, width, height), label))
+            if (TouchGUI.NeonButton(new Rect(x, y, width, height), $"{level + 1}", NeonTheme.Pink, NeonTheme.Cyan, outlined: selectedLevel != level, fontSize: 16))
             {
                 ShowAll();
                 selectedLevel = level;
             }
+        }
+
+        if (TouchGUI.NeonButton(new Rect(x, ui.y - 56f, width, 44f), "Menu", NeonTheme.Cyan, NeonTheme.Pink, fontSize: 16))
+        {
+            if (GameMenuUI.Instance != null) GameMenuUI.Instance.ShowMenu();
         }
 
         TouchGUI.End();

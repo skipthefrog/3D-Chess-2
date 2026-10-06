@@ -1,0 +1,230 @@
+using UnityEngine;
+using UnityEngine.UI;
+
+/// <summary>
+/// Shared look for the "wacky quirky neon" style: palette, procedural sprites and
+/// helpers for chunky tilted buttons with hard offset shadows.
+/// </summary>
+public static class NeonTheme
+{
+    public static readonly Color Ground = Hex("14002E");
+    public static readonly Color Pink = Hex("FF2E9A");
+    public static readonly Color PinkSoft = Hex("FF8FC7");
+    public static readonly Color Lime = Hex("C6FF3D");
+    public static readonly Color Cyan = Hex("29F0FF");
+    public static readonly Color Yellow = Hex("FFE14D");
+    public static readonly Color Lavender = Hex("C9B8F0");
+    public static readonly Color Muted = Hex("5A3A8C");
+    public static readonly Color White = Color.white;
+
+    private static Sprite rounded;
+    private static Sprite roundedOutline;
+    private static Sprite circle;
+
+    public static Color Hex(string hex)
+    {
+        ColorUtility.TryParseHtmlString("#" + hex, out Color c);
+        return c;
+    }
+
+    /// <summary>Filled rounded rectangle, 9-sliced so it stretches to any size</summary>
+    public static Sprite Rounded
+    {
+        get
+        {
+            if (rounded == null) rounded = MakeRounded(18f, false);
+            return rounded;
+        }
+    }
+
+    /// <summary>Rounded rectangle outline (3px stroke), 9-sliced</summary>
+    public static Sprite RoundedOutline
+    {
+        get
+        {
+            if (roundedOutline == null) roundedOutline = MakeRounded(18f, true);
+            return roundedOutline;
+        }
+    }
+
+    public static Sprite Circle
+    {
+        get
+        {
+            if (circle == null)
+            {
+                const int size = 64;
+                var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+                tex.wrapMode = TextureWrapMode.Clamp;
+                float r = size / 2f;
+                for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float d = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(r, r));
+                    tex.SetPixel(x, y, new Color(1, 1, 1, Mathf.Clamp01(r - d)));
+                }
+                tex.Apply();
+                circle = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f);
+            }
+            return circle;
+        }
+    }
+
+    private static Sprite squareOutline;
+
+    /// <summary>Sharp-cornered square outline, for drawing board levels</summary>
+    public static Sprite SquareOutline
+    {
+        get
+        {
+            if (squareOutline == null) squareOutline = MakeRounded(1f, true);
+            return squareOutline;
+        }
+    }
+
+    private static Sprite MakeRounded(float radius, bool outlineOnly)
+    {
+        const int size = 64;
+        const float stroke = 4f;
+        var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+        {
+            // Signed distance to a rounded rectangle filling the texture
+            float px = Mathf.Abs(x + 0.5f - size / 2f) - (size / 2f - radius);
+            float py = Mathf.Abs(y + 0.5f - size / 2f) - (size / 2f - radius);
+            float outside = new Vector2(Mathf.Max(px, 0), Mathf.Max(py, 0)).magnitude + Mathf.Min(Mathf.Max(px, py), 0) - radius;
+            float alpha = Mathf.Clamp01(0.5f - outside);
+            if (outlineOnly) alpha *= Mathf.Clamp01(outside + stroke + 0.5f);
+            tex.SetPixel(x, y, new Color(1, 1, 1, alpha));
+        }
+        tex.Apply();
+        float b = Mathf.Max(radius, stroke) + 2f;
+        return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect, new Vector4(b, b, b, b));
+    }
+
+    /// <summary>
+    /// Style an Image as a chunky neon button face: rounded fill, dark border, hard offset shadow
+    /// </summary>
+    public static void StyleFilled(Image image, Color fill, Color shadow, float tiltDegrees = 0f)
+    {
+        image.sprite = Rounded;
+        image.type = Image.Type.Sliced;
+        image.color = fill;
+        AddEffects(image.gameObject, Ground, shadow);
+        image.rectTransform.localEulerAngles = new Vector3(0, 0, tiltDegrees);
+    }
+
+    /// <summary>Unselected chip: transparent with a colored border, no shadow</summary>
+    public static void StyleOutline(Image image, Color border, float tiltDegrees = 0f)
+    {
+        image.sprite = RoundedOutline;
+        image.type = Image.Type.Sliced;
+        image.color = border;
+        RemoveEffects(image.gameObject);
+        image.rectTransform.localEulerAngles = new Vector3(0, 0, tiltDegrees);
+    }
+
+    private static void AddEffects(GameObject go, Color border, Color shadow)
+    {
+        RemoveEffects(go);
+        var outline = go.AddComponent<Outline>();
+        outline.effectColor = border;
+        outline.effectDistance = new Vector2(3f, -3f);
+        var drop = go.AddComponent<Shadow>();
+        drop.effectColor = shadow;
+        drop.effectDistance = new Vector2(5f, -5f);
+    }
+
+    private static void RemoveEffects(GameObject go)
+    {
+        foreach (var effect in go.GetComponents<Shadow>()) Object.Destroy(effect); // Outline derives from Shadow
+    }
+
+    /// <summary>
+    /// Button colors that only darken slightly on press, so the Image's own color shows as-is
+    /// </summary>
+    public static void NeutralTint(Button button)
+    {
+        var colors = button.colors;
+        colors.normalColor = Color.white;
+        colors.highlightedColor = Color.white;
+        colors.selectedColor = Color.white;
+        colors.pressedColor = new Color(0.85f, 0.85f, 0.85f, 1f);
+        colors.disabledColor = new Color(1f, 1f, 1f, 0.35f);
+        button.colors = colors;
+    }
+
+    // IMGUI styles for the in-game OnGUI controls
+
+    private static Texture2D solid;
+    private static Texture2D Solid
+    {
+        get
+        {
+            if (solid == null)
+            {
+                solid = new Texture2D(1, 1);
+                solid.SetPixel(0, 0, Color.white);
+                solid.Apply();
+            }
+            return solid;
+        }
+    }
+
+    /// <summary>
+    /// Draw a neon button with IMGUI: hard offset shadow, dark border, colored face.
+    /// Returns true when clicked.
+    /// </summary>
+    public static bool GUIButton(Rect rect, string text, Color fill, Color shadow, bool outlined = false, int fontSize = 15)
+    {
+        Color prev = GUI.color;
+        if (!outlined)
+        {
+            GUI.color = shadow;
+            GUI.DrawTexture(new Rect(rect.x + 3, rect.y + 3, rect.width, rect.height), Solid, ScaleMode.StretchToFill, true, 0, shadow, 0, 10);
+            GUI.color = prev;
+            GUI.DrawTexture(rect, Solid, ScaleMode.StretchToFill, true, 0, fill, 0, 10);
+            GUI.DrawTexture(rect, Solid, ScaleMode.StretchToFill, true, 0, Ground, 2.5f, 10);
+        }
+        else
+        {
+            GUI.DrawTexture(rect, Solid, ScaleMode.StretchToFill, true, 0, new Color(Ground.r, Ground.g, Ground.b, 0.6f), 0, 10);
+            GUI.DrawTexture(rect, Solid, ScaleMode.StretchToFill, true, 0, fill, 2.5f, 10);
+        }
+        GUI.color = prev;
+
+        var style = new GUIStyle(GUI.skin.label)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            fontSize = fontSize,
+            fontStyle = FontStyle.Bold,
+            wordWrap = true
+        };
+        style.normal.textColor = outlined ? fill : Ground;
+        GUI.Label(rect, text, style);
+
+        return GUI.Button(rect, GUIContent.none, GUIStyle.none);
+    }
+
+    /// <summary>Rounded panel with a neon border (no shadow)</summary>
+    public static void GUIPanel(Rect rect, Color border, float alpha = 0.92f)
+    {
+        GUI.DrawTexture(rect, Solid, ScaleMode.StretchToFill, true, 0, new Color(Ground.r, Ground.g, Ground.b, alpha), 0, 14);
+        GUI.DrawTexture(rect, Solid, ScaleMode.StretchToFill, true, 0, border, 2.5f, 14);
+    }
+
+    public static GUIStyle GUILabelStyle(Color color, int fontSize, bool bold = true, TextAnchor anchor = TextAnchor.MiddleLeft)
+    {
+        var style = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = fontSize,
+            fontStyle = bold ? FontStyle.Bold : FontStyle.Normal,
+            alignment = anchor,
+            wordWrap = true
+        };
+        style.normal.textColor = color;
+        return style;
+    }
+}

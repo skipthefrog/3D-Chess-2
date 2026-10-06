@@ -62,6 +62,15 @@ public static class TouchGUI
     }
 
     /// <summary>
+    /// Neon-styled button (see NeonTheme) that also blocks board taps underneath it
+    /// </summary>
+    public static bool NeonButton(Rect rect, string text, Color fill, Color shadow, bool outlined = false, int fontSize = 15)
+    {
+        Block(rect);
+        return NeonTheme.GUIButton(rect, text, fill, shadow, outlined, fontSize);
+    }
+
+    /// <summary>
     /// Mark a rect (in the coordinates passed to GUI calls since Begin) as covered by UI
     /// </summary>
     public static void Block(Rect rect)

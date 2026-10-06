@@ -137,6 +137,7 @@ public class PlacementUI : MonoBehaviour
         // Set GUI style
         GUI.skin.button.fontSize = 14; // Reduced from 16 for better fit in narrow buttons
         GUI.skin.label.fontSize = 14;
+        GUI.skin.label.normal.textColor = NeonTheme.Lavender;
 
         // Game state info
         GUI.Label(stateInfoRect, currentStateText);
@@ -157,7 +158,7 @@ public class PlacementUI : MonoBehaviour
             // Deselect button - only show if a piece is selected
             if (PlacementManager.Instance != null && HasSelectedTrayPiece())
             {
-                if (TouchGUI.Button(deselectButtonRect, "Deselect Piece"))
+                if (TouchGUI.NeonButton(deselectButtonRect, "Deselect Piece", NeonTheme.Cyan, NeonTheme.Pink, outlined: true))
                 {
                     OnDeselectButtonClicked();
                 }
@@ -191,7 +192,7 @@ public class PlacementUI : MonoBehaviour
             if (!isHuman || PlacementManager.Instance.IsPlayerPlacementCompleted(player)) continue;
 
             Rect rect = new Rect(entry.Value.x, 140, entry.Value.width, buttonHeight);
-            if (TouchGUI.Button(rect, $"Auto-place {player}"))
+            if (TouchGUI.NeonButton(rect, $"Auto-place {player}", NeonTheme.Yellow, NeonTheme.Pink))
             {
                 PlacementManager.Instance.AutoPlaceRemaining(player);
             }
@@ -361,7 +362,10 @@ public class PlacementUI : MonoBehaviour
             GUI.backgroundColor = buttonColor;
 
             // Draw button
-            if (TouchGUI.Button(playerReadyButtonRects[player], buttonText))
+            Color fill = playerReady ? NeonTheme.Lime : allPiecesPlaced ? NeonTheme.Pink : NeonTheme.Lavender;
+            Rect readyRect = playerReadyButtonRects[player];
+            int readyFont = readyRect.width < 110f ? 12 : 15; // narrower buttons with 4-6 players
+            if (TouchGUI.NeonButton(readyRect, buttonText, fill, NeonTheme.Cyan, outlined: !playerReady && !allPiecesPlaced, fontSize: readyFont))
             {
                 OnPlayerReadyButtonClicked(player);
             }
