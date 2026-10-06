@@ -78,6 +78,90 @@ public class CameraController : MonoBehaviour
         
         targetPosition = target.position;
         UpdateCameraPosition();
+
+        // Trays and pieces are created a moment after the scene starts, so fit once they exist
+        StartCoroutine(FitToBoardAfterSetup());
+    }
+
+    private System.Collections.IEnumerator FitToBoardAfterSetup()
+    {
+        yield return new WaitForSeconds(0.75f);
+        FitDistanceToBoard();
+    }
+
+    /// <summary>
+    /// Set the zoom so the board and the piece trays fill the screen for the current
+    /// screen shape, instead of a fixed distance that leaves a phone screen mostly empty.
+    /// </summary>
+    public void FitDistanceToBoard()
+    {
+        Camera cam = GetComponent<Camera>();
+        if (cam == null) return;
+
+        Vector3 center = target != null ? target.position : Vector3.zero;
+
+        // Only the board, its trays and the pieces count toward what must be on screen
+        var renderers = new System.Collections.Generic.List<Renderer>();
+        foreach (EmergencyChessBoard board in FindObjectsByType<EmergencyChessBoard>(FindObjectsSortMode.None))
+            renderers.AddRange(board.GetComponentsInChildren<Renderer>());
+        foreach (PieceTray tray in FindObjectsByType<PieceTray>(FindObjectsSortMode.None))
+            renderers.AddRange(tray.GetComponentsInChildren<Renderer>());
+        foreach (ChessPiece piece in FindObjectsByType<ChessPiece>(FindObjectsSortMode.None))
+            renderers.AddRange(piece.GetComponentsInChildren<Renderer>());
+
+        var corners = new System.Collections.Generic.List<Vector3>();
+        var cornerOwners = new System.Collections.Generic.List<string>();
+        foreach (Renderer r in renderers)
+        {
+            if (r == null || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+            // Use the mesh's own box rotated into place; the world-aligned box of a
+            // tilted tray is much larger than the tray and would zoom out too far
+            MeshFilter mf = r.GetComponent<MeshFilter>();
+            Bounds b = mf != null && mf.sharedMesh != null ? mf.sharedMesh.bounds : r.localBounds;
+            Vector3 min = b.min, max = b.max;
+            Matrix4x4 m = r.transform.localToWorldMatrix;
+            corners.Add(m.MultiplyPoint3x4(new Vector3(min.x, min.y, min.z))); corners.Add(m.MultiplyPoint3x4(new Vector3(max.x, min.y, min.z)));
+            corners.Add(m.MultiplyPoint3x4(new Vector3(min.x, max.y, min.z))); corners.Add(m.MultiplyPoint3x4(new Vector3(max.x, max.y, min.z)));
+            corners.Add(m.MultiplyPoint3x4(new Vector3(min.x, min.y, max.z))); corners.Add(m.MultiplyPoint3x4(new Vector3(max.x, min.y, max.z)));
+            corners.Add(m.MultiplyPoint3x4(new Vector3(min.x, max.y, max.z))); corners.Add(m.MultiplyPoint3x4(new Vector3(max.x, max.y, max.z)));
+            for (int k = 0; k < 8; k++) cornerOwners.Add(r.name);
+        }
+        if (corners.Count == 0) return;
+
+        // Find the closest zoom where every corner is in front of the camera and
+        // inside the margins below (binary search on distance)
+        // Viewport half-size is 0.5. Leave more room top and bottom for the
+        // on-screen buttons and status text.
+        const float targetExtentX = 0.46f;
+        const float targetExtentY = 0.38f;
+        float near = minDistance, far = maxDistance;
+        for (int i = 0; i < 20; i++)
+        {
+            distance = (near + far) * 0.5f;
+            UpdateCameraPosition();
+            bool fits = true;
+            foreach (Vector3 c in corners)
+            {
+                Vector3 v = cam.WorldToViewportPoint(c);
+                if (v.z <= cam.nearClipPlane || Mathf.Abs(v.x - 0.5f) > targetExtentX || Mathf.Abs(v.y - 0.5f) > targetExtentY)
+                {
+                    fits = false;
+                    break;
+                }
+            }
+            if (fits) far = distance; else near = distance;
+        }
+        distance = far;
+        UpdateCameraPosition();
+        string widest = ""; float widestExtent = 0f;
+        for (int i = 0; i < corners.Count; i++)
+        {
+            Vector3 v = cam.WorldToViewportPoint(corners[i]);
+            float e = Mathf.Max(Mathf.Abs(v.x - 0.5f), Mathf.Abs(v.y - 0.5f));
+            if (e > widestExtent) { widestExtent = e; widest = cornerOwners[i]; }
+        }
+        Debug.Log($"🎥 Widest object on screen: {widest} ({widestExtent:F2})");
+        Debug.Log($"🎥 Fit camera to board: distance {distance:F1} from {renderers.Count} renderers");
     }
     
     private void Update()
@@ -283,6 +367,7 @@ public class CameraController : MonoBehaviour
         currentHorizontalAngle = 0f;
         currentVerticalAngle = 30f;
         distance = 20f;
+        FitDistanceToBoard();
         
         // Auto-determine behavior based on distance
         currentMode = distance < 10f ? CameraMode.Interior : CameraMode.Overview;

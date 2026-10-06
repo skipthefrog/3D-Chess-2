@@ -21,7 +21,7 @@ public class PlacementUI : MonoBehaviour
     {
         // Calculate UI positions
         deselectButtonRect = new Rect(20, 140, buttonWidth, buttonHeight);
-        stateInfoRect = new Rect(20, 380, buttonWidth * 2, buttonHeight * 2);
+        stateInfoRect = new Rect(20, 80, buttonWidth * 3, 55);
 
         // Calculate ready button positions dynamically based on player count
         CalculatePlayerReadyButtonPositions();
@@ -128,6 +128,14 @@ public class PlacementUI : MonoBehaviour
             return;
         }
 
+        // Layout is authored at 160 dpi; scale it up on high-density screens (phones)
+        // and keep it inside the safe area so the notch and home indicator don't cover it
+        float uiScale = GetUIScale();
+        Rect safe = Screen.safeArea;
+        GUI.matrix = Matrix4x4.TRS(new Vector3(safe.x, Screen.height - safe.yMax, 0f), Quaternion.identity, new Vector3(uiScale, uiScale, 1f));
+        float uiWidth = safe.width / uiScale;
+        float uiHeight = safe.height / uiScale;
+
         // Set GUI style
         GUI.skin.button.fontSize = 14; // Reduced from 16 for better fit in narrow buttons
         GUI.skin.label.fontSize = 14;
@@ -162,9 +170,17 @@ public class PlacementUI : MonoBehaviour
         string instructions = GetInstructions();
         if (!string.IsNullOrEmpty(instructions))
         {
-            Rect instructionsRect = new Rect(20, Screen.height - 120, Screen.width - 40, 100);
+            Rect instructionsRect = new Rect(20, uiHeight - 70, uiWidth - 40, 60);
             GUI.Label(instructionsRect, instructions);
         }
+
+        GUI.matrix = Matrix4x4.identity;
+    }
+
+    private static float GetUIScale()
+    {
+        float dpi = Screen.dpi > 0f ? Screen.dpi : 160f;
+        return Mathf.Clamp(dpi / 160f, 1f, 3f);
     }
     
     /// <summary>
