@@ -12,7 +12,10 @@ public static class Backdrops
     {
         NeonGlow = 0,
         DeepSpace = 1,
+        NeonDesert = 2,
     }
+
+    public static readonly Kind[] All = { Kind.DeepSpace, Kind.NeonDesert, Kind.NeonGlow };
 
     private const string PrefKey = "Backdrop";
 
@@ -31,17 +34,43 @@ public static class Backdrops
         switch (kind)
         {
             case Kind.DeepSpace: return "Deep Space";
+            case Kind.NeonDesert: return "Neon Desert";
             default: return "Neon Glow";
         }
     }
 
-    private static Material spaceSky;
-    private static Task<Color32[]> spaceTask;
-    private const int SpaceWidth = 2048, SpaceHeight = 1024;
+    public static string Description(Kind kind)
+    {
+        switch (kind)
+        {
+            case Kind.DeepSpace: return "Stars, galaxies and glowing nebulae all around the board";
+            case Kind.NeonDesert: return "Synthwave sunset over dunes, a glowing grid below and drifting dust";
+            default: return "Clean violet glow, easy on the eyes";
+        }
+    }
+
+    // ───────── Skies (generated once on a worker thread, then cached) ─────────
+
+    private const int SkyWidth = 2048, SkyHeight = 1024;
+    private static readonly System.Collections.Generic.Dictionary<Kind, Material> skies = new System.Collections.Generic.Dictionary<Kind, Material>();
+    private static readonly System.Collections.Generic.Dictionary<Kind, Task<Color32[]>> skyTasks = new System.Collections.Generic.Dictionary<Kind, Task<Color32[]>>();
+
+    private static Func<Color32[]> Generator(Kind kind)
+    {
+        switch (kind)
+        {
+            case Kind.NeonDesert: return () => DesertSky.Generate(SkyWidth, SkyHeight, 1984);
+            default: return () => SpaceSky.Generate(SkyWidth, SkyHeight, 20261006);
+        }
+    }
+
+    // Color shown while a sky is still being generated
+    private static Color LoadingColor(Kind kind) =>
+        kind == Kind.NeonDesert ? new Color32(30, 4, 50, 255) : new Color32(4, 2, 14, 255);
 
     /// <summary>
     /// Apply the chosen backdrop to a camera. Returns false while a sky is still being
-    /// generated; call again next frame (the plain neon color shows meanwhile).
+    /// generated; call again next frame (a plain color shows meanwhile).
     /// </summary>
     public static bool Apply(Camera cam, Kind kind)
     {
@@ -50,6 +79,7 @@ public static class Backdrops
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = NeonTheme.Ground;
             RenderSettings.skybox = null;
+            Scenery.Clear();
             if (probe != null)
             {
                 probe.clearFlags = UnityEngine.Rendering.ReflectionProbeClearFlags.SolidColor;
@@ -60,26 +90,29 @@ public static class Backdrops
             return true;
         }
 
-        if (spaceSky == null)
+        if (!skies.TryGetValue(kind, out Material sky) || sky == null)
         {
             cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = new Color32(4, 2, 14, 255);
+            cam.backgroundColor = LoadingColor(kind);
 
-            // Generate the texture off the main thread so the game doesn't hitch
-            if (spaceTask == null) spaceTask = Task.Run(() => SpaceSky.Generate(SpaceWidth, SpaceHeight, 20261006));
-            if (!spaceTask.IsCompleted) return false;
-            if (spaceTask.IsFaulted)
+            if (!skyTasks.TryGetValue(kind, out Task<Color32[]> task))
             {
-                Debug.LogError($"Backdrops: space sky failed: {spaceTask.Exception}");
-                spaceTask = null;
+                task = Task.Run(Generator(kind));
+                skyTasks[kind] = task;
+            }
+            if (!task.IsCompleted) return false;
+            skyTasks.Remove(kind);
+            if (task.IsFaulted)
+            {
+                Debug.LogError($"Backdrops: {kind} sky failed: {task.Exception}");
                 return true;
             }
 
-            var tex = new Texture2D(SpaceWidth, SpaceHeight, TextureFormat.RGBA32, true);
+            var tex = new Texture2D(SkyWidth, SkyHeight, TextureFormat.RGBA32, true);
             tex.wrapModeU = TextureWrapMode.Repeat;
             tex.wrapModeV = TextureWrapMode.Clamp;
             tex.filterMode = FilterMode.Trilinear;
-            tex.SetPixels32(spaceTask.Result);
+            tex.SetPixels32(task.Result);
             tex.Apply(true, true);
 
             Shader shader = Shader.Find("Skybox/Panoramic");
@@ -88,15 +121,20 @@ public static class Backdrops
                 Debug.LogError("Backdrops: Skybox/Panoramic shader missing from build");
                 return true;
             }
-            spaceSky = new Material(shader);
-            spaceSky.SetTexture("_MainTex", tex);
-            spaceSky.SetFloat("_Mapping", 1f);   // latitude-longitude layout
-            spaceSky.SetFloat("_ImageType", 0f); // 360°
-            spaceSky.SetFloat("_Exposure", 1f);
+            sky = new Material(shader);
+            sky.SetTexture("_MainTex", tex);
+            sky.SetFloat("_Mapping", 1f);   // latitude-longitude layout
+            sky.SetFloat("_ImageType", 0f); // 360°
+            sky.SetFloat("_Exposure", 1f);
+            skies[kind] = sky;
         }
 
-        RenderSettings.skybox = spaceSky;
+        RenderSettings.skybox = sky;
         cam.clearFlags = CameraClearFlags.Skybox;
+
+        if (kind == Kind.NeonDesert) Scenery.BuildDesert(cam);
+        else Scenery.Clear();
+
         RefreshReflections();
         return true;
     }
@@ -138,12 +176,338 @@ public static class Backdrops
         }
     }
 
-    /// <summary>Slowly turn the sky so space feels alive</summary>
+    /// <summary>Slowly turn the space sky so it feels alive (the desert stays put)</summary>
     public static void Drift(float degreesPerSecond)
     {
-        if (spaceSky != null && RenderSettings.skybox == spaceSky)
+        if (skies.TryGetValue(Kind.DeepSpace, out Material space) && space != null && RenderSettings.skybox == space)
         {
-            spaceSky.SetFloat("_Rotation", (Time.time * degreesPerSecond) % 360f);
+            space.SetFloat("_Rotation", (Time.time * degreesPerSecond) % 360f);
+        }
+    }
+}
+
+/// <summary>
+/// 3D extras that go with a backdrop: ground, particles, fog and lighting.
+/// Everything is undone by Clear() so other backdrops look as before.
+/// </summary>
+public static class Scenery
+{
+    private static GameObject root;
+    private static bool fogWasOn;
+    private static readonly System.Collections.Generic.Dictionary<Light, (Color color, float intensity, Quaternion rotation)> savedLights =
+        new System.Collections.Generic.Dictionary<Light, (Color, float, Quaternion)>();
+    private static Color savedAmbient;
+    private static bool changed;
+
+    public static void Clear()
+    {
+        if (root != null) UnityEngine.Object.Destroy(root);
+        root = null;
+        if (!changed) return;
+        RenderSettings.fog = fogWasOn;
+        RenderSettings.ambientLight = savedAmbient;
+        foreach (var entry in savedLights)
+        {
+            if (entry.Key == null) continue;
+            entry.Key.color = entry.Value.color;
+            entry.Key.intensity = entry.Value.intensity;
+            entry.Key.transform.rotation = entry.Value.rotation;
+        }
+        savedLights.Clear();
+        changed = false;
+    }
+
+    public static void BuildDesert(Camera cam)
+    {
+        Clear();
+        fogWasOn = RenderSettings.fog;
+        savedAmbient = RenderSettings.ambientLight;
+        changed = true;
+
+        root = new GameObject("Neon Desert Scenery");
+
+        // Glowing grid floor far below the board, fading into the sunset haze
+        GameObject ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        ground.name = "Grid Ground";
+        UnityEngine.Object.Destroy(ground.GetComponent<Collider>()); // never catch taps
+        ground.transform.SetParent(root.transform, false);
+        ground.transform.position = new Vector3(0f, -24f, 0f);
+        ground.transform.localScale = new Vector3(80f, 1f, 80f); // 800 x 800 units
+        Shader unlit = Shader.Find("Unlit/Texture");
+        var groundMat = new Material(unlit != null ? unlit : Shader.Find("Standard"));
+        groundMat.mainTexture = GridTexture();
+        groundMat.mainTextureScale = new Vector2(70f, 70f);
+        ground.GetComponent<MeshRenderer>().sharedMaterial = groundMat;
+        ground.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+
+        // Haze: grid and distant ground melt into the horizon color
+        RenderSettings.fog = true;
+        RenderSettings.fogMode = FogMode.Linear;
+        RenderSettings.fogColor = new Color(0.55f, 0.16f, 0.45f);
+        RenderSettings.fogStartDistance = 70f;
+        RenderSettings.fogEndDistance = 330f;
+
+        // Warm sunset light from the sun's side, so chrome glints gold and pink
+        RenderSettings.ambientLight = new Color(0.42f, 0.24f, 0.42f);
+        foreach (Light light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None))
+        {
+            if (light.type != LightType.Directional) continue;
+            savedLights[light] = (light.color, light.intensity, light.transform.rotation);
+            light.color = new Color(1f, 0.68f, 0.45f);
+            light.intensity = Mathf.Max(light.intensity, 1.15f);
+            light.transform.rotation = Quaternion.Euler(18f, 180f, 0f); // low sun, shining toward the board
+        }
+
+        // Drifting sand dust around the board
+        root.AddComponent<DesertDust>();
+    }
+
+    // Dark violet tiles with bright pink lines and a softer cyan glow
+    private static Texture2D GridTexture()
+    {
+        const int size = 128;
+        var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
+        tex.wrapMode = TextureWrapMode.Repeat;
+        tex.filterMode = FilterMode.Trilinear;
+        tex.anisoLevel = 8;
+        Color ground = new Color(0.07f, 0.0f, 0.13f);
+        Color line = NeonTheme.Pink;
+        Color glow = new Color(0.16f, 0.94f, 1f);
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+        {
+            float dx = Mathf.Min(x, size - 1 - x);
+            float dy = Mathf.Min(y, size - 1 - y);
+            float d = Mathf.Min(dx, dy);
+            float core = Mathf.Clamp01(1.6f - d);           // ~2px line
+            float halo = Mathf.Exp(-d * 0.35f) * 0.35f;      // soft glow either side
+            Color c = ground + glow * halo * 0.35f;
+            c = Color.Lerp(c, line, core);
+            c.a = 1f;
+            tex.SetPixel(x, y, c);
+        }
+        tex.Apply(true);
+        return tex;
+    }
+}
+
+/// <summary>Slow warm dust drifting past the board in the desert</summary>
+public class DesertDust : MonoBehaviour
+{
+    private void Start()
+    {
+        var ps = gameObject.AddComponent<ParticleSystem>();
+        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
+        var main = ps.main;
+        main.loop = true;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(10f, 18f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(0.2f, 0.7f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.3f);
+        main.startColor = new ParticleSystem.MinMaxGradient(
+            new Color(1f, 0.75f, 0.45f, 0.55f), new Color(1f, 0.35f, 0.7f, 0.45f));
+        main.maxParticles = 260;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.prewarm = true;
+
+        var emission = ps.emission;
+        emission.rateOverTime = 18f;
+
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Box;
+        shape.scale = new Vector3(70f, 34f, 70f);
+
+        // Gentle breeze with a little wobble
+        var velocity = ps.velocityOverLifetime;
+        velocity.enabled = true;
+        velocity.space = ParticleSystemSimulationSpace.World;
+        velocity.x = new ParticleSystem.MinMaxCurve(0.6f, 1.2f);
+        velocity.y = new ParticleSystem.MinMaxCurve(-0.1f, 0.15f);
+        velocity.z = new ParticleSystem.MinMaxCurve(-0.2f, 0.2f);
+
+        var noise = ps.noise;
+        noise.enabled = true;
+        noise.strength = 0.4f;
+        noise.frequency = 0.15f;
+
+        var fade = ps.colorOverLifetime;
+        fade.enabled = true;
+        var gradient = new Gradient();
+        gradient.SetKeys(
+            new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+            new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(1f, 0.2f), new GradientAlphaKey(1f, 0.8f), new GradientAlphaKey(0f, 1f) });
+        fade.color = gradient;
+
+        var renderer = GetComponent<ParticleSystemRenderer>();
+        var material = new Material(Shader.Find("Sprites/Default"));
+        material.mainTexture = NeonTheme.Circle.texture;
+        renderer.sharedMaterial = material;
+        renderer.renderMode = ParticleSystemRenderMode.Billboard;
+
+        ps.Play();
+    }
+}
+
+/// <summary>
+/// Procedural equirectangular synthwave desert: violet-to-orange sunset sky, a striped
+/// neon sun, two ridges of mountains and dunes with glowing rims, and a perspective grid
+/// below the horizon. Pure C# so it can run on a worker thread.
+/// </summary>
+public static class DesertSky
+{
+    public static Color32[] Generate(int width, int height, int seed)
+    {
+        var rng = new System.Random(seed);
+        var result = new Color32[width * height];
+
+        const float horizon = 0.5f;          // v of the horizon line
+        const float sunU = 0.25f;            // where the sun sits around the sky
+        const float sunV = 0.405f;           // sun centre, just above the horizon
+        const float sunR = 0.085f;           // radius in v units
+
+        // Ridge heights (in v above the horizon), periodic around the sky
+        float[] far = new float[width];
+        float[] near = new float[width];
+        for (int x = 0; x < width; x++)
+        {
+            float u = (float)x / width;
+            far[x] = 0.035f + 0.05f * Ridge(u * 9f, 9, seed) + 0.02f * Ridge(u * 23f, 23, seed + 7);
+            // Dunes: smooth rolling bumps
+            near[x] = 0.012f + 0.016f * (0.5f + 0.5f * (float)Math.Sin(u * Math.PI * 2 * 7 + 1.3))
+                              + 0.012f * (0.5f + 0.5f * (float)Math.Sin(u * Math.PI * 2 * 17 + 0.4)) * Ridge(u * 5f, 5, seed + 3);
+        }
+
+        // Faint stars in the upper sky
+        var stars = new System.Collections.Generic.HashSet<int>();
+        for (int k = 0; k < 1400; k++)
+        {
+            int sx = rng.Next(width), sy = rng.Next((int)(height * 0.3f));
+            stars.Add(sy * width + sx);
+        }
+
+        for (int y = 0; y < height; y++)
+        {
+            float v = (y + 0.5f) / height;
+            for (int x = 0; x < width; x++)
+            {
+                float u = (x + 0.5f) / width;
+                Color c;
+
+                if (v < horizon)
+                {
+                    // Sky: deep violet at the top, magenta, then hot orange at the horizon
+                    float t = v / horizon;
+                    c = Gradient3(new Color(0.06f, 0.0f, 0.16f), new Color(0.42f, 0.08f, 0.45f), new Color(1.0f, 0.42f, 0.28f), Mathf.Pow(t, 1.6f));
+                    if (stars.Contains(y * width + x)) c += Color.white * (0.35f * (1f - t));
+
+                    // Sun glow
+                    float du = WrapDelta(u - sunU) * 2f; // u spans 360°, v spans 180°
+                    float dv = v - sunV;
+                    float dist = (float)Math.Sqrt(du * du + dv * dv);
+                    c += new Color(1f, 0.35f, 0.55f) * (0.45f * (float)Math.Exp(-dist * dist / (sunR * sunR * 6f)));
+
+                    // Sun disc: yellow top to pink bottom, with synthwave stripes in its lower half
+                    if (dist < sunR)
+                    {
+                        float st = (dv + sunR) / (2f * sunR); // 0 top, 1 bottom
+                        Color sun = Color.Lerp(NeonTheme.Yellow, NeonTheme.Pink, st);
+                        bool stripe = false;
+                        if (st > 0.5f)
+                        {
+                            float band = (st - 0.5f) * 2f;          // 0..1 down the lower half
+                            float gap = 0.06f + 0.10f * band;        // gaps widen toward the bottom
+                            float period = 0.22f;
+                            stripe = ((band + 0.08f) % period) < gap;
+                        }
+                        if (!stripe) c = Color.Lerp(c, sun, Mathf.Clamp01((sunR - dist) / 0.002f));
+                    }
+
+                    // Far mountains: deep purple with a pink rim
+                    float farTop = horizon - far[x];
+                    if (v > farTop)
+                    {
+                        float depth = (v - farTop) / far[x];
+                        Color mount = Color.Lerp(new Color(0.26f, 0.06f, 0.38f), new Color(0.16f, 0.03f, 0.27f), depth);
+                        float rim = Mathf.Clamp01(1f - (v - farTop) * height / 2.5f);
+                        c = Color.Lerp(mount, NeonTheme.Pink, rim * 0.9f);
+                    }
+
+                    // Near dunes: darker, with a cyan rim
+                    float nearTop = horizon - near[x];
+                    if (v > nearTop)
+                    {
+                        float depth = (v - nearTop) / near[x];
+                        Color dune = Color.Lerp(new Color(0.14f, 0.02f, 0.22f), new Color(0.08f, 0.0f, 0.15f), depth);
+                        float rim = Mathf.Clamp01(1f - (v - nearTop) * height / 2f);
+                        c = Color.Lerp(dune, new Color(0.16f, 0.94f, 1f), rim * 0.8f);
+                    }
+                }
+                else
+                {
+                    // Ground below the horizon (seen past the 3D grid floor): dark plain with a
+                    // perspective grid that converges on the horizon
+                    float below = v - horizon;                       // 0 at horizon
+                    Color ground = Color.Lerp(new Color(0.55f, 0.16f, 0.45f), new Color(0.05f, 0.0f, 0.1f), Mathf.Clamp01(below * 6f));
+                    float depth = 0.02f / Math.Max(below, 0.0005f);  // distance along the ground
+                    float lineZ = Math.Abs(depth % 1f - 0.5f);       // horizontal lines
+                    float lineX = Math.Abs((u * 96f) % 1f - 0.5f);   // lines running away from the viewer
+                    float sharp = Mathf.Clamp01(below * 40f);        // blend lines out near the horizon
+                    float grid = Math.Max(Mathf.Clamp01((lineZ - 0.46f) * 25f), Mathf.Clamp01((lineX - 0.47f) * 30f)) * sharp;
+                    c = Color.Lerp(ground, NeonTheme.Pink, grid * 0.85f);
+                }
+
+                c.a = 1f;
+                result[(height - 1 - y) * width + x] = c; // Unity textures start at the bottom row
+            }
+        }
+        return result;
+    }
+
+    private static Color Gradient3(Color a, Color b, Color c, float t)
+    {
+        return t < 0.5f ? Color.Lerp(a, b, t * 2f) : Color.Lerp(b, c, (t - 0.5f) * 2f);
+    }
+
+    private static float WrapDelta(float d)
+    {
+        if (d > 0.5f) d -= 1f;
+        if (d < -0.5f) d += 1f;
+        return d;
+    }
+
+    // Mountain-like ridge noise in 0..1; repeats every `period` so the sky has no seam
+    private static float Ridge(float x, int period, int seed)
+    {
+        float sum = 0f, amp = 0.55f, norm = 0f;
+        int freq = 1;
+        for (int o = 0; o < 4; o++)
+        {
+            float n = Noise1(x * freq, period * freq, seed + o * 31);
+            sum += amp * (1f - Math.Abs(n * 2f - 1f)); // ridged
+            norm += amp;
+            amp *= 0.5f;
+            freq *= 2;
+        }
+        return sum / norm;
+    }
+
+    private static float Noise1(float x, int period, int seed)
+    {
+        int xi = (int)Math.Floor(x);
+        float f = x - xi;
+        float t = f * f * (3 - 2 * f);
+        int a = ((xi % period) + period) % period, b = (((xi + 1) % period) + period) % period;
+        return Hash(a, seed) * (1 - t) + Hash(b, seed) * t;
+    }
+
+    private static float Hash(int x, int seed)
+    {
+        unchecked
+        {
+            int h = x * 374761393 + seed * 668265263;
+            h = (h ^ (h >> 13)) * 1274126177;
+            h ^= h >> 16;
+            return (h & 0xFFFFFF) / (float)0xFFFFFF;
         }
     }
 }

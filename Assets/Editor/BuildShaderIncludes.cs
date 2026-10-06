@@ -21,7 +21,8 @@ public static class BuildShaderIncludes
         "Sprites/Default",
         "UI/Default",
         "UI/Unlit/Transparent",
-        "Skybox/Panoramic", // space backdrop
+        "Skybox/Panoramic", // backdrops
+        "Unlit/Texture",    // desert grid floor
     };
 
     [MenuItem("Build/Include Runtime Shaders")]

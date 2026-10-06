@@ -572,18 +572,27 @@ public class NeonMenu : MonoBehaviour
         SectionLabel(right, "Backdrop the board floats in", NeonTheme.PinkSoft);
         ChipRow(right, new (string, System.Action, System.Func<bool>, System.Func<bool>)[]
         {
-            (Backdrops.DisplayName(Backdrops.Kind.DeepSpace), () => Backdrops.Current = Backdrops.Kind.DeepSpace, () => Backdrops.Current == Backdrops.Kind.DeepSpace, () => true),
-            (Backdrops.DisplayName(Backdrops.Kind.NeonGlow), () => Backdrops.Current = Backdrops.Kind.NeonGlow, () => Backdrops.Current == Backdrops.Kind.NeonGlow, () => true),
+            BackdropChip(Backdrops.Kind.DeepSpace),
+            BackdropChip(Backdrops.Kind.NeonDesert),
+        }, NeonTheme.Cyan, 16);
+        ChipRow(right, new (string, System.Action, System.Func<bool>, System.Func<bool>)[]
+        {
+            BackdropChip(Backdrops.Kind.NeonGlow),
         }, NeonTheme.Cyan, 16);
         backdropNote = NewText("Note", right, "", 15, NeonTheme.Lavender, TextAlignmentOptions.TopLeft);
         backdropNote.fontStyle = FontStyles.Normal;
         backdropNote.enableWordWrapping = true;
         backdropNote.gameObject.AddComponent<LayoutElement>().preferredHeight = 44;
 
-        TextMeshProUGUI more = NewText("More", right, "More backdrops and piece sets coming soon.", 14, NeonTheme.Muted, TextAlignmentOptions.TopLeft);
+        TextMeshProUGUI more = NewText("More", right, "More backdrops and piece sets on the way.", 14, NeonTheme.Muted, TextAlignmentOptions.TopLeft);
         more.fontStyle = FontStyles.Normal;
         more.enableWordWrapping = true;
         more.gameObject.AddComponent<LayoutElement>().preferredHeight = 40;
+    }
+
+    private (string, System.Action, System.Func<bool>, System.Func<bool>) BackdropChip(Backdrops.Kind kind)
+    {
+        return (Backdrops.DisplayName(kind), () => Backdrops.Current = kind, () => Backdrops.Current == kind, () => true);
     }
 
     private (string, System.Action, System.Func<bool>, System.Func<bool>) PieceSetChip(PieceSets.Kind kind)
@@ -597,9 +606,7 @@ public class NeonMenu : MonoBehaviour
         pieceSetNote.text = PieceSets.Description(PieceSets.Current);
         PieceColor[] sides = { PieceColor.White, PieceColor.Black, PieceColor.Green, PieceColor.Purple, PieceColor.Yellow, PieceColor.Orange };
         for (int i = 0; i < swatches.Length; i++) swatches[i].color = PieceSets.Tint(PieceSets.Current, sides[i]);
-        backdropNote.text = Backdrops.Current == Backdrops.Kind.DeepSpace
-            ? "Stars, galaxies and glowing nebulae all around the board"
-            : "Clean violet glow, easy on the eyes";
+        backdropNote.text = Backdrops.Description(Backdrops.Current);
     }
 
     // ───────────────────────── Navigation ─────────────────────────
