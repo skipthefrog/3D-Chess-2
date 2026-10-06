@@ -142,45 +142,19 @@ public class InputManager : MonoBehaviour
             HandleGameActionShortcuts();
         }
         
-        // Check for input
-        bool touchInput = InputHelper.TouchCount > 0;
-        bool mouseInput = InputHelper.GetMouseButtonDown(0);
-        
-        // Handle touch input for iOS using InputHelper
-        if (touchInput)
+        // Process each tap or click exactly once. On iOS a touch also raises
+        // simulated mouse events, so handling both would run the same tap 2-3 times.
+        if (InputHelper.TouchCount > 0)
         {
             Touch touch = InputHelper.GetTouch(0);
-            Debug.Log($"HandleInput: Touch detected - phase={touch.phase}, position={touch.position}");
             if (touch.phase == TouchPhase.Began)
             {
-                Debug.Log("HandleInput: Processing touch input");
                 ProcessTouch(touch.position);
             }
         }
-        
-        // Handle mouse input for testing in editor using InputHelper
-        if (mouseInput)
+        else if (InputHelper.GetMouseButtonDown(0))
         {
-            Vector3 mousePos = InputHelper.MousePosition;
-            Debug.Log($"HandleInput: Mouse click detected at {mousePos}");
-            ProcessTouch(mousePos);
-        }
-        
-        // FALLBACK: Direct Input system for testing (bypass InputHelper)
-        try 
-        {
-            if (Input.GetMouseButtonDown(0))
-            {
-                Debug.Log("HandleInput: FALLBACK - Direct Input.GetMouseButtonDown detected");
-                ProcessTouch(Input.mousePosition);
-            }
-        }
-        catch (System.InvalidOperationException e)
-        {
-            if (Time.frameCount % 300 == 0) // Log every 5 seconds
-            {
-                Debug.LogWarning($"HandleInput: Direct input still failing - {e.Message}");
-            }
+            ProcessTouch(InputHelper.MousePosition);
         }
         
         // Keyboard testing

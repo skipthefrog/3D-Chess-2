@@ -36,9 +36,40 @@ public class iOSBuildScript
         EditorApplication.Exit(ok ? 0 : 1);
     }
 
+    /// <summary>
+    /// Export an Xcode project that runs in the iOS Simulator (Builds/iOS-Simulator).
+    /// </summary>
+    [MenuItem("Build/Build iOS Simulator")]
+    public static void BuildSimulator()
+    {
+        ConfigureiOSSettings();
+        PlayerSettings.iOS.sdkVersion = iOSSdkVersion.SimulatorSDK;
+        PlayerSettings.iOS.simulatorSdkArchitecture = AppleMobileArchitectureSimulator.ARM64;
+        try
+        {
+            BuildiOS(BuildOptions.Development, "Builds/iOS-Simulator");
+        }
+        finally
+        {
+            PlayerSettings.iOS.sdkVersion = iOSSdkVersion.DeviceSDK;
+        }
+    }
+
+    public static void BuildSimulatorFromCommandLine()
+    {
+        ConfigureiOSSettings();
+        PlayerSettings.iOS.sdkVersion = iOSSdkVersion.SimulatorSDK;
+        PlayerSettings.iOS.simulatorSdkArchitecture = AppleMobileArchitectureSimulator.ARM64;
+        bool ok = BuildiOS(BuildOptions.Development, "Builds/iOS-Simulator");
+        PlayerSettings.iOS.sdkVersion = iOSSdkVersion.DeviceSDK;
+        EditorApplication.Exit(ok ? 0 : 1);
+    }
+
     private static void ConfigureiOSSettings()
     {
         Debug.Log("⚙️ Configuring iOS Player Settings...");
+
+        BuildShaderIncludes.EnsureIncluded();
 
         PlayerSettings.companyName = "Bom Sapo";
         PlayerSettings.productName = "3D Chess";
@@ -64,7 +95,7 @@ public class iOSBuildScript
         Debug.Log("✅ iOS settings configured");
     }
 
-    private static bool BuildiOS(BuildOptions options)
+    private static bool BuildiOS(BuildOptions options, string buildPath = BUILD_PATH)
     {
         string[] scenes = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray();
         if (scenes.Length == 0)
@@ -74,18 +105,18 @@ public class iOSBuildScript
         }
 
         // Always export a clean Xcode project
-        if (Directory.Exists(BUILD_PATH))
+        if (Directory.Exists(buildPath))
         {
-            Directory.Delete(BUILD_PATH, true);
+            Directory.Delete(buildPath, true);
         }
-        Directory.CreateDirectory(BUILD_PATH);
+        Directory.CreateDirectory(buildPath);
 
-        Debug.Log($"📦 Building {scenes.Length} scenes to: {BUILD_PATH}");
-        BuildReport report = BuildPipeline.BuildPlayer(scenes, BUILD_PATH, BuildTarget.iOS, options);
+        Debug.Log($"📦 Building {scenes.Length} scenes to: {buildPath}");
+        BuildReport report = BuildPipeline.BuildPlayer(scenes, buildPath, BuildTarget.iOS, options);
 
         if (report.summary.result == BuildResult.Succeeded)
         {
-            Debug.Log($"✅ iOS build succeeded: open {BUILD_PATH}/Unity-iPhone.xcodeproj in Xcode");
+            Debug.Log($"✅ iOS build succeeded: open {buildPath}/Unity-iPhone.xcodeproj in Xcode");
             return true;
         }
 

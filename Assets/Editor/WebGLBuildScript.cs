@@ -45,6 +45,8 @@ public class WebGLBuildScript
     {
         Debug.Log("⚙️ Configuring WebGL Player Settings...");
 
+        BuildShaderIncludes.EnsureIncluded();
+
         // Compression
         PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Brotli;
 

@@ -631,11 +631,8 @@ public abstract class ChessPiece : MonoBehaviour
     
     protected virtual void OnMouseDown()
     {
-        InputManager inputManager = FindFirstObjectByType<InputManager>();
-        if (inputManager != null)
-        {
-            inputManager.OnPieceClicked(this);
-        }
+        // Clicks and taps are handled by InputManager's raycast. Calling it here too
+        // made every click on a piece run twice (and three times on touch screens).
     }
     
     private GameObject selectionGlow;
