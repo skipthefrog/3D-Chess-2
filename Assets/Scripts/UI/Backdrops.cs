@@ -44,7 +44,7 @@ public static class Backdrops
         switch (kind)
         {
             case Kind.DeepSpace: return "Stars, galaxies and glowing nebulae all around the board";
-            case Kind.NeonDesert: return "Synthwave sunset over dunes, a glowing grid below and drifting dust";
+            case Kind.NeonDesert: return "Synthwave sunset over shifting sand dunes, with drifting dust";
             default: return "Clean violet glow, easy on the eyes";
         }
     }
@@ -226,21 +226,23 @@ public static class Scenery
 
         root = new GameObject("Neon Desert Scenery");
 
-        // Glowing grid floor far below the board, fading into the sunset haze
-        GameObject ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
-        ground.name = "Grid Ground";
-        UnityEngine.Object.Destroy(ground.GetComponent<Collider>()); // never catch taps
+        // Rolling sand dunes far below the board; DesertDunes slowly shifts them
+        GameObject ground = new GameObject("Sand Dunes");
         ground.transform.SetParent(root.transform, false);
-        ground.transform.position = new Vector3(0f, -24f, 0f);
-        ground.transform.localScale = new Vector3(80f, 1f, 80f); // 800 x 800 units
-        Shader unlit = Shader.Find("Unlit/Texture");
-        var groundMat = new Material(unlit != null ? unlit : Shader.Find("Standard"));
-        groundMat.mainTexture = GridTexture();
-        groundMat.mainTextureScale = new Vector2(70f, 70f);
-        ground.GetComponent<MeshRenderer>().sharedMaterial = groundMat;
-        ground.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        ground.transform.position = new Vector3(0f, -26f, 0f);
+        ground.AddComponent<MeshFilter>();
+        var groundRenderer = ground.AddComponent<MeshRenderer>();
+        var sandMat = new Material(Shader.Find("Standard"));
+        sandMat.mainTexture = SandTexture();
+        sandMat.mainTextureScale = new Vector2(16f, 16f);
+        sandMat.color = new Color(0.86f, 0.6f, 0.66f);
+        sandMat.SetFloat("_Metallic", 0f);
+        sandMat.SetFloat("_Glossiness", 0.12f);
+        groundRenderer.sharedMaterial = sandMat;
+        groundRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        ground.AddComponent<DesertDunes>();
 
-        // Haze: grid and distant ground melt into the horizon color
+        // Haze: distant dunes melt into the horizon color
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.Linear;
         RenderSettings.fogColor = new Color(0.55f, 0.16f, 0.45f);
@@ -262,32 +264,119 @@ public static class Scenery
         root.AddComponent<DesertDust>();
     }
 
-    // Dark violet tiles with bright pink lines and a softer cyan glow
-    private static Texture2D GridTexture()
+    // Wind ripples in sand: soft wavy bands with fine grain, tiles seamlessly
+    private static Texture2D SandTexture()
     {
-        const int size = 128;
+        const int size = 256;
         var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
         tex.wrapMode = TextureWrapMode.Repeat;
         tex.filterMode = FilterMode.Trilinear;
         tex.anisoLevel = 8;
-        Color ground = new Color(0.07f, 0.0f, 0.13f);
-        Color line = NeonTheme.Pink;
-        Color glow = new Color(0.16f, 0.94f, 1f);
+        var rng = new System.Random(7);
+        Color light = new Color(0.98f, 0.72f, 0.62f);  // sunlit peach
+        Color dark = new Color(0.62f, 0.34f, 0.48f);   // rose shadow in the troughs
         for (int y = 0; y < size; y++)
         for (int x = 0; x < size; x++)
         {
-            float dx = Mathf.Min(x, size - 1 - x);
-            float dy = Mathf.Min(y, size - 1 - y);
-            float d = Mathf.Min(dx, dy);
-            float core = Mathf.Clamp01(1.6f - d);           // ~2px line
-            float halo = Mathf.Exp(-d * 0.35f) * 0.35f;      // soft glow either side
-            Color c = ground + glow * halo * 0.35f;
-            c = Color.Lerp(c, line, core);
+            float u = (float)x / size, v = (float)y / size;
+            // Ripples run across the wind, with a gentle wobble (whole periods so it tiles)
+            float wobble = 0.03f * Mathf.Sin(u * Mathf.PI * 2f) + 0.012f * Mathf.Sin(u * Mathf.PI * 2f * 3f + 1.7f);
+            float phase = (v + wobble) * 6f;
+            float ripple = 0.5f + 0.5f * Mathf.Sin(phase * Mathf.PI * 2f);
+            ripple = Mathf.Pow(ripple, 1.8f); // sharp crests, wide troughs
+            float grain = (float)rng.NextDouble() * 0.08f - 0.04f;
+            Color c = Color.Lerp(dark, light, 0.62f + 0.3f * ripple) + new Color(grain, grain, grain); // subtle ripples
             c.a = 1f;
             tex.SetPixel(x, y, c);
         }
         tex.Apply(true);
         return tex;
+    }
+}
+
+/// <summary>
+/// A wide field of dunes whose shapes drift slowly with the wind, plus sand ripples
+/// that creep along the surface.
+/// </summary>
+public class DesertDunes : MonoBehaviour
+{
+    private const int Res = 90;          // vertices per side
+    private const float Size = 700f;     // world units per side
+    private Mesh mesh;
+    private Vector3[] vertices;
+    private Material material;
+    private float nextUpdate;
+
+    private void Start()
+    {
+        mesh = new Mesh { name = "Dunes" };
+        mesh.MarkDynamic();
+        vertices = new Vector3[Res * Res];
+        var uvs = new Vector2[Res * Res];
+        var triangles = new int[(Res - 1) * (Res - 1) * 6];
+        for (int z = 0; z < Res; z++)
+        for (int x = 0; x < Res; x++)
+        {
+            int i = z * Res + x;
+            float fx = (float)x / (Res - 1), fz = (float)z / (Res - 1);
+            vertices[i] = new Vector3((fx - 0.5f) * Size, 0f, (fz - 0.5f) * Size);
+            uvs[i] = new Vector2(fx, fz);
+        }
+        int t = 0;
+        for (int z = 0; z < Res - 1; z++)
+        for (int x = 0; x < Res - 1; x++)
+        {
+            int i = z * Res + x;
+            triangles[t++] = i; triangles[t++] = i + Res; triangles[t++] = i + 1;
+            triangles[t++] = i + 1; triangles[t++] = i + Res; triangles[t++] = i + Res + 1;
+        }
+        mesh.vertices = vertices;
+        mesh.uv = uvs;
+        mesh.triangles = triangles;
+        GetComponent<MeshFilter>().sharedMesh = mesh;
+        material = GetComponent<MeshRenderer>().sharedMaterial;
+        Shape(0f);
+    }
+
+    private void Update()
+    {
+        // Ripples creep with the wind every frame (cheap)
+        if (material != null) material.mainTextureOffset = new Vector2(0f, Time.time * 0.012f);
+
+        // Dune shapes shift a little several times a second
+        if (Time.time >= nextUpdate)
+        {
+            nextUpdate = Time.time + 0.1f;
+            Shape(Time.time);
+        }
+    }
+
+    private void Shape(float time)
+    {
+        float drift = time * 0.6f; // dunes migrate slowly downwind
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            float x = vertices[i].x, z = vertices[i].z;
+            float wx = x + drift;
+            // Long crescent ridges, crossed by smaller dunes
+            float h = 9f * Ridge((wx * 0.6f + z * 0.8f) * 0.018f + 0.6f * Mathf.Sin(z * 0.011f))
+                    + 4f * Ridge((wx * 0.9f - z * 0.4f) * 0.035f + 0.4f * Mathf.Sin(wx * 0.02f))
+                    + 1.5f * Mathf.Sin(wx * 0.09f + z * 0.05f);
+            // Flatten right under the board so dunes never poke into view up close
+            float r = Mathf.Sqrt(x * x + z * z);
+            h *= Mathf.Clamp01((r - 25f) / 60f);
+            vertices[i].y = h;
+        }
+        mesh.vertices = vertices;
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+    }
+
+    // Sharp-crested, smooth-backed dune profile in 0..1
+    private static float Ridge(float p)
+    {
+        float s = 0.5f + 0.5f * Mathf.Sin(p * Mathf.PI * 2f);
+        return s * s;
     }
 }
 
@@ -350,7 +439,7 @@ public class DesertDust : MonoBehaviour
 
 /// <summary>
 /// Procedural equirectangular synthwave desert: violet-to-orange sunset sky, a striped
-/// neon sun, two ridges of mountains and dunes with glowing rims, and a perspective grid
+/// neon sun, two ridges of mountains and dunes with glowing rims, and banded sand
 /// below the horizon. Pure C# so it can run on a worker thread.
 /// </summary>
 public static class DesertSky
@@ -444,16 +533,15 @@ public static class DesertSky
                 }
                 else
                 {
-                    // Ground below the horizon (seen past the 3D grid floor): dark plain with a
-                    // perspective grid that converges on the horizon
+                    // Sand below the horizon, seen past the 3D dunes: banded dune crests
+                    // that crowd together toward the horizon
                     float below = v - horizon;                       // 0 at horizon
-                    Color ground = Color.Lerp(new Color(0.55f, 0.16f, 0.45f), new Color(0.05f, 0.0f, 0.1f), Mathf.Clamp01(below * 6f));
-                    float depth = 0.02f / Math.Max(below, 0.0005f);  // distance along the ground
-                    float lineZ = Math.Abs(depth % 1f - 0.5f);       // horizontal lines
-                    float lineX = Math.Abs((u * 96f) % 1f - 0.5f);   // lines running away from the viewer
-                    float sharp = Mathf.Clamp01(below * 40f);        // blend lines out near the horizon
-                    float grid = Math.Max(Mathf.Clamp01((lineZ - 0.46f) * 25f), Mathf.Clamp01((lineX - 0.47f) * 30f)) * sharp;
-                    c = Color.Lerp(ground, NeonTheme.Pink, grid * 0.85f);
+                    float depth = 0.02f / Math.Max(below, 0.0005f);  // distance across the sand
+                    float wave = 0.5f + 0.5f * (float)Math.Sin((depth * 1.3f + 0.25f * Math.Sin(u * Math.PI * 2 * 6)) * Math.PI * 2);
+                    Color sand = Color.Lerp(new Color(0.42f, 0.16f, 0.36f), new Color(0.9f, 0.5f, 0.5f), wave * wave);
+                    Color haze = new Color(0.55f, 0.16f, 0.45f);
+                    c = Color.Lerp(haze, sand, Mathf.Clamp01(below * 9f));
+                    c = Color.Lerp(c, new Color(0.18f, 0.05f, 0.2f), Mathf.Clamp01((below - 0.25f) * 2f)); // darker straight down
                 }
 
                 c.a = 1f;
