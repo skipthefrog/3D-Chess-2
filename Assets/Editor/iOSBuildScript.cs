@@ -1,4 +1,5 @@
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 using System.IO;
@@ -41,15 +42,15 @@ public class iOSBuildScript
 
         PlayerSettings.companyName = "Bom Sapo";
         PlayerSettings.productName = "3D Chess";
-        PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.iOS, BUNDLE_ID);
+        PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.iOS, BUNDLE_ID);
 
         // Signing
         PlayerSettings.iOS.appleDeveloperTeamID = TEAM_ID;
         PlayerSettings.iOS.appleEnableAutomaticSigning = true;
 
         // Runtime
-        PlayerSettings.SetScriptingBackend(BuildTargetGroup.iOS, ScriptingImplementation.IL2CPP);
-        PlayerSettings.SetArchitecture(BuildTargetGroup.iOS, 1); // ARM64
+        PlayerSettings.SetScriptingBackend(NamedBuildTarget.iOS, ScriptingImplementation.IL2CPP);
+        PlayerSettings.SetArchitecture(NamedBuildTarget.iOS, 1); // ARM64
         PlayerSettings.iOS.targetOSVersionString = "15.0";
         PlayerSettings.iOS.targetDevice = iOSTargetDevice.iPhoneAndiPad;
 

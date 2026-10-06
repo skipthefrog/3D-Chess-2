@@ -1,8 +1,8 @@
+using System;
 using UnityEngine;
 
 // Test different Socket.IO package possibilities
 #if UNITY_EDITOR
-using System;
 
 // Try to detect which Socket.IO package is installed
 #endif
