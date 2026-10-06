@@ -12,7 +12,7 @@ public class CoordinateLabelsUI : MonoBehaviour
     [Header("Label Settings")]
     public bool enableLabels = true;
     public int fontSize = 32;
-    public float labelOpacity = 0.25f; // 25% transparency
+    public float labelOpacity = 0.35f; // see-through, but readable over the backdrops
     public Color labelColor = new Color(0.2f, 0.2f, 0.2f); // Dark grey
     public float labelDistance = 2.0f; // Distance from board edge
 
@@ -180,13 +180,19 @@ public class CoordinateLabelsUI : MonoBehaviour
         textMesh.fontSize = fontSize;
         textMesh.alignment = TextAlignmentOptions.Center;
 
-        // Set color with opacity
-        Color colorWithOpacity = labelColor;
+        // Neon style: the game's display font in cyan, still see-through so it never hides pieces
+        Color colorWithOpacity = NeonTheme.Cyan;
         colorWithOpacity.a = labelOpacity;
         textMesh.color = colorWithOpacity;
 
-        // Set font
-        textMesh.font = Resources.Load<TMP_FontAsset>("LiberationSans SDF");
+        if (NeonTheme.DisplayTMP != null)
+        {
+            textMesh.font = NeonTheme.DisplayTMP;
+        }
+        else
+        {
+            textMesh.font = Resources.Load<TMP_FontAsset>("LiberationSans SDF");
+        }
 
         // Configure for world space
         RectTransform rectTransform = labelObj.GetComponent<RectTransform>();
