@@ -311,6 +311,13 @@ public class NeonMenu : MonoBehaviour
             ("Galaxy", () => SetDifficulty(AIDifficulty.Hard), () => difficulty == AIDifficulty.Hard, () => true),
         }, NeonTheme.Yellow, 16);
 
+        SectionLabel(right, "Backdrop", NeonTheme.PinkSoft);
+        ChipRow(right, new (string, System.Action, System.Func<bool>, System.Func<bool>)[]
+        {
+            (Backdrops.DisplayName(Backdrops.Kind.DeepSpace), () => Backdrops.Current = Backdrops.Kind.DeepSpace, () => Backdrops.Current == Backdrops.Kind.DeepSpace, () => true),
+            (Backdrops.DisplayName(Backdrops.Kind.NeonGlow), () => Backdrops.Current = Backdrops.Kind.NeonGlow, () => Backdrops.Current == Backdrops.Kind.NeonGlow, () => true),
+        }, NeonTheme.Cyan, 16);
+
         SwitchRow(right, "Chaos Mode", out chaosNote, out chaosSwitch, out chaosKnob, () => { chaosMode = !chaosMode; Refresh(); });
         SwitchRow(right, "Speed round", out timedNote, out timedSwitch, out timedKnob, () => { timedPlay = !timedPlay; Refresh(); });
 

@@ -8,6 +8,7 @@ public class NeonGameLook : MonoBehaviour
 {
     private EmergencyChessBoard board;
     private int styledFloors;
+    private bool backdropApplied;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Create()
@@ -23,15 +24,16 @@ public class NeonGameLook : MonoBehaviour
         {
             board = FindFirstObjectByType<EmergencyChessBoard>();
             styledFloors = 0;
+            backdropApplied = false;
             if (board == null) return;
         }
 
         Camera cam = Camera.main;
-        if (cam != null && cam.clearFlags != CameraClearFlags.SolidColor)
+        if (cam != null && !backdropApplied)
         {
-            cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = NeonTheme.Ground;
+            backdropApplied = Backdrops.Apply(cam, Backdrops.Current);
         }
+        Backdrops.Drift(0.4f);
 
         // The board is built a frame or two after the scene starts; style it once it exists
         MeshRenderer[] renderers = FindObjectsByType<MeshRenderer>(FindObjectsSortMode.None);

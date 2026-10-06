@@ -20,7 +20,7 @@ public class PersistentCheckStatusUI : MonoBehaviour
     public Color safeColor = Color.green;
     public Color checkColor = Color.red;
     public Color currentTurnColor = new Color(0.3f, 0.6f, 1f, 1f); // Blue for current turn
-    public Color backgroundColor = new Color(0.078f, 0f, 0.18f, 0.9f); // neon ground (#14002E)
+    public Color backgroundColor = new Color(0.078f, 0f, 0.18f, 0.45f); // neon ground (#14002E), see-through so backdrops show
     
     [Header("Status Icons")]
     // Plain text: the game's font has no glyphs for check marks, warning signs or emoji
