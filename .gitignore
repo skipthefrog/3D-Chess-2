@@ -49,3 +49,5 @@ ios_build/
 
 # Unity Burst temporary files
 burst_*.txt
+# Build output
+Builds/

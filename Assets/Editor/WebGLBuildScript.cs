@@ -1,6 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 using System.IO;
+using UnityEditor.Build.Reporting;
 
 /// <summary>
 /// Automated build script for WebGL with proper configuration
