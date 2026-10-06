@@ -768,14 +768,14 @@ public class InputManager : MonoBehaviour
                 indicator.transform.localPosition = localPos + Vector3.up * 0.5f; // Slightly above floor
                 Debug.Log($"ShowValidMoveIndicators: Created indicator for {move} at local position {localPos}");
             
-            // Make it smaller and glowing
-            indicator.transform.localScale = new Vector3(0.4f, 0.4f, 0.4f);
+            // Same size as placement indicators so they are easy to see and tap
+            indicator.transform.localScale = new Vector3(0.8f, 0.8f, 0.8f);
             
             // Keep collider but make it larger for mobile-friendly clicking
             SphereCollider indicatorCollider = indicator.GetComponent<SphereCollider>();
             if (indicatorCollider != null)
             {
-                indicatorCollider.radius = 1.2f; // Larger than visual for easier touch targeting
+                indicatorCollider.radius = 1.0f; // Larger than visual for easier touch targeting
                 Debug.Log($"ShowValidMoveIndicators: Set collider radius to {indicatorCollider.radius} for move {move}");
             }
             

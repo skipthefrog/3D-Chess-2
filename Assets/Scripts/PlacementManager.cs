@@ -987,8 +987,8 @@ public class PlacementManager : MonoBehaviour
             }
         }
         
-        // Make it small and unobtrusive
-        indicator.transform.localScale = new Vector3(0.2f, 0.2f, 0.2f);
+        // Large enough to see and tap on a phone screen
+        indicator.transform.localScale = new Vector3(0.8f, 0.8f, 0.8f);
         
         // Ensure rotation is normalized to prevent quaternion warnings
         indicator.transform.rotation = Quaternion.identity;
@@ -1002,7 +1002,7 @@ public class PlacementManager : MonoBehaviour
         
         // Add a larger invisible collider for easier clicking
         SphereCollider clickCollider = indicator.AddComponent<SphereCollider>();
-        clickCollider.radius = 2f; // Much larger for easier clicking
+        clickCollider.radius = 1.0f; // Larger than the visual for easier touch targeting
         
         // Add component to identify this as a placement target
         PlacementTargetData targetData = indicator.AddComponent<PlacementTargetData>();
