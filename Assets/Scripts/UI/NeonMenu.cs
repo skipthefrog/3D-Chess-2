@@ -55,6 +55,7 @@ public class NeonMenu : MonoBehaviour
         BuildCanvas();
         BuildMenuScreen();
         BuildSetupScreen();
+        BuildCustomizeScreen();
         ShowMenu();
 
         // The old menu builds its UI in its own Start; hide it once it exists
@@ -186,8 +187,7 @@ public class NeonMenu : MonoBehaviour
         NeonButton(row, "Online Game", new Vector2(178, 52), NeonTheme.Yellow, NeonTheme.Cyan, -1f, 18,
             () => ShowToast("Online play is coming soon!"));
 
-        TextMeshProUGUI hint = NewText("How To", column, "Tap ? in a game for how to play", 15, NeonTheme.Lavender, TextAlignmentOptions.Left);
-        hint.rectTransform.sizeDelta = new Vector2(370, 22);
+        NeonButton(column, "Customize: pieces & backdrops", new Vector2(370, 44), NeonTheme.Cyan, NeonTheme.Pink, 0.5f, 16, ShowCustomize);
 
         toastText = NewText("Toast", menuScreen.transform, "", 18, NeonTheme.Yellow, TextAlignmentOptions.Center);
         toastText.rectTransform.anchorMin = new Vector2(0, 0);
@@ -310,13 +310,6 @@ public class NeonMenu : MonoBehaviour
             ("Walnut", () => SetDifficulty(AIDifficulty.Medium), () => difficulty == AIDifficulty.Medium, () => true),
             ("Galaxy", () => SetDifficulty(AIDifficulty.Hard), () => difficulty == AIDifficulty.Hard, () => true),
         }, NeonTheme.Yellow, 16);
-
-        SectionLabel(right, "Backdrop", NeonTheme.PinkSoft);
-        ChipRow(right, new (string, System.Action, System.Func<bool>, System.Func<bool>)[]
-        {
-            (Backdrops.DisplayName(Backdrops.Kind.DeepSpace), () => Backdrops.Current = Backdrops.Kind.DeepSpace, () => Backdrops.Current == Backdrops.Kind.DeepSpace, () => true),
-            (Backdrops.DisplayName(Backdrops.Kind.NeonGlow), () => Backdrops.Current = Backdrops.Kind.NeonGlow, () => Backdrops.Current == Backdrops.Kind.NeonGlow, () => true),
-        }, NeonTheme.Cyan, 16);
 
         SwitchRow(right, "Chaos Mode", out chaosNote, out chaosSwitch, out chaosKnob, () => { chaosMode = !chaosMode; Refresh(); });
         SwitchRow(right, "Speed round", out timedNote, out timedSwitch, out timedKnob, () => { timedPlay = !timedPlay; Refresh(); });
@@ -490,6 +483,7 @@ public class NeonMenu : MonoBehaviour
             for (int pad = playerCount % 3; pad != 0 && pad < 3; pad++) NewRect("Spacer", row);
         }
 
+        RefreshCustomize();
         SetSwitch(chaosSwitch, chaosKnob, chaosMode);
         chaosNote.text = chaosMode ? "Cube spins every 9 turns" : "Off";
         SetSwitch(timedSwitch, timedKnob, timedPlay);
@@ -505,17 +499,130 @@ public class NeonMenu : MonoBehaviour
         knob.GetComponent<Image>().color = on ? NeonTheme.Ground : NeonTheme.Lavender;
     }
 
+    // ───────────────────────── Customize ─────────────────────────
+
+    private GameObject customizeScreen;
+    private TextMeshProUGUI pieceSetNote, backdropNote;
+    private Image[] swatches;
+
+    private void BuildCustomizeScreen()
+    {
+        customizeScreen = NewRect("Customize Screen", safeRoot).gameObject;
+        RectTransform root = customizeScreen.GetComponent<RectTransform>();
+        Stretch(root);
+
+        RectTransform header = NewRect("Header", root);
+        header.anchorMin = new Vector2(0, 1);
+        header.anchorMax = new Vector2(1, 1);
+        header.pivot = new Vector2(0.5f, 1);
+        header.offsetMin = new Vector2(16, -64);
+        header.offsetMax = new Vector2(-24, -12);
+
+        Button back = NeonButton(header, "<", new Vector2(48, 48), NeonTheme.Cyan, NeonTheme.Pink, 0f, 24, ShowMenu);
+        Place((RectTransform)back.transform, new Vector2(0, 0.5f), new Vector2(48, 48), new Vector2(28, 0));
+
+        TextMeshProUGUI title = NewText("Title", header, "MAKE IT YOURS", 30, NeonTheme.Lime, TextAlignmentOptions.Left);
+        NeonTheme.ApplyFont(title, display: true);
+        title.rectTransform.anchorMin = new Vector2(0, 0);
+        title.rectTransform.anchorMax = new Vector2(1, 1);
+        title.rectTransform.offsetMin = new Vector2(70, 0);
+        title.rectTransform.offsetMax = new Vector2(-180, 0);
+        title.rectTransform.localEulerAngles = new Vector3(0, 0, -1);
+
+        Button done = NeonButton(header, "Done!", new Vector2(150, 50), NeonTheme.Pink, NeonTheme.Cyan, 2f, 20, ShowMenu);
+        Place((RectTransform)done.transform, new Vector2(1, 0.5f), new Vector2(150, 50), new Vector2(-75, 0));
+
+        RectTransform left = Card(root, "Pieces Card", NeonTheme.Cyan, new Vector2(0f, 0f), new Vector2(0.5f, 1f), new Vector2(16, 14), new Vector2(-8, -74));
+        RectTransform right = Card(root, "Backdrop Card", NeonTheme.Pink, new Vector2(0.5f, 0f), new Vector2(1f, 1f), new Vector2(8, 14), new Vector2(-24, -74));
+
+        SectionLabel(left, "Piece set", NeonTheme.Cyan);
+        ChipRow(left, new (string, System.Action, System.Func<bool>, System.Func<bool>)[]
+        {
+            PieceSetChip(PieceSets.Kind.NeonGlow),
+            PieceSetChip(PieceSets.Kind.Chrome),
+        }, NeonTheme.Lime, 16);
+        ChipRow(left, new (string, System.Action, System.Func<bool>, System.Func<bool>)[]
+        {
+            PieceSetChip(PieceSets.Kind.Crystal),
+            PieceSetChip(PieceSets.Kind.Classic),
+        }, NeonTheme.Lime, 16);
+        pieceSetNote = NewText("Note", left, "", 15, NeonTheme.Lavender, TextAlignmentOptions.Left);
+        pieceSetNote.fontStyle = FontStyles.Normal;
+        pieceSetNote.gameObject.AddComponent<LayoutElement>().preferredHeight = 22;
+
+        // Colour swatches for the six sides in the chosen set
+        RectTransform swatchRow = NewRect("Swatches", left);
+        var swatchSize = swatchRow.gameObject.AddComponent<LayoutElement>();
+        swatchSize.preferredHeight = 30;
+        swatchSize.flexibleHeight = 0;
+        var swatchLayout = swatchRow.gameObject.AddComponent<HorizontalLayoutGroup>();
+        swatchLayout.spacing = 10;
+        swatchLayout.childControlWidth = false;
+        swatchLayout.childControlHeight = false;
+        swatchLayout.childForceExpandWidth = false;
+        swatchLayout.childAlignment = TextAnchor.MiddleLeft;
+        swatches = new Image[6];
+        for (int i = 0; i < 6; i++)
+        {
+            swatches[i] = NewImage(ColorNames[i], swatchRow, Color.white);
+            swatches[i].sprite = NeonTheme.Circle;
+            swatches[i].rectTransform.sizeDelta = new Vector2(26, 26);
+        }
+
+        SectionLabel(right, "Backdrop the board floats in", NeonTheme.PinkSoft);
+        ChipRow(right, new (string, System.Action, System.Func<bool>, System.Func<bool>)[]
+        {
+            (Backdrops.DisplayName(Backdrops.Kind.DeepSpace), () => Backdrops.Current = Backdrops.Kind.DeepSpace, () => Backdrops.Current == Backdrops.Kind.DeepSpace, () => true),
+            (Backdrops.DisplayName(Backdrops.Kind.NeonGlow), () => Backdrops.Current = Backdrops.Kind.NeonGlow, () => Backdrops.Current == Backdrops.Kind.NeonGlow, () => true),
+        }, NeonTheme.Cyan, 16);
+        backdropNote = NewText("Note", right, "", 15, NeonTheme.Lavender, TextAlignmentOptions.TopLeft);
+        backdropNote.fontStyle = FontStyles.Normal;
+        backdropNote.enableWordWrapping = true;
+        backdropNote.gameObject.AddComponent<LayoutElement>().preferredHeight = 44;
+
+        TextMeshProUGUI more = NewText("More", right, "More backdrops and piece sets coming soon.", 14, NeonTheme.Muted, TextAlignmentOptions.TopLeft);
+        more.fontStyle = FontStyles.Normal;
+        more.enableWordWrapping = true;
+        more.gameObject.AddComponent<LayoutElement>().preferredHeight = 40;
+    }
+
+    private (string, System.Action, System.Func<bool>, System.Func<bool>) PieceSetChip(PieceSets.Kind kind)
+    {
+        return (PieceSets.DisplayName(kind), () => PieceSets.Current = kind, () => PieceSets.Current == kind, () => true);
+    }
+
+    private void RefreshCustomize()
+    {
+        if (pieceSetNote == null) return;
+        pieceSetNote.text = PieceSets.Description(PieceSets.Current);
+        PieceColor[] sides = { PieceColor.White, PieceColor.Black, PieceColor.Green, PieceColor.Purple, PieceColor.Yellow, PieceColor.Orange };
+        for (int i = 0; i < swatches.Length; i++) swatches[i].color = PieceSets.Tint(PieceSets.Current, sides[i]);
+        backdropNote.text = Backdrops.Current == Backdrops.Kind.DeepSpace
+            ? "Stars, galaxies and glowing nebulae all around the board"
+            : "Clean violet glow, easy on the eyes";
+    }
+
     // ───────────────────────── Navigation ─────────────────────────
 
     private void ShowMenu()
     {
         menuScreen.SetActive(true);
         setupScreen.SetActive(false);
+        customizeScreen.SetActive(false);
+    }
+
+    private void ShowCustomize()
+    {
+        menuScreen.SetActive(false);
+        setupScreen.SetActive(false);
+        customizeScreen.SetActive(true);
+        Refresh();
     }
 
     private void ShowSetup()
     {
         menuScreen.SetActive(false);
+        customizeScreen.SetActive(false);
         setupScreen.SetActive(true);
         Refresh();
     }

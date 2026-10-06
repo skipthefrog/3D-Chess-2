@@ -59,6 +59,52 @@ public static class BuildShaderIncludes
         }
 
         serialized.ApplyModifiedProperties();
+        EnsurePieceSetMaterials();
         AssetDatabase.SaveAssets();
+    }
+
+    /// <summary>
+    /// Template materials for PieceSets. Shipping them keeps the Standard shader variants
+    /// the sets need (emission, transparency) from being stripped out of builds.
+    /// </summary>
+    private static void EnsurePieceSetMaterials()
+    {
+        const string folder = "Assets/Resources/PieceSets";
+        if (!AssetDatabase.IsValidFolder(folder)) AssetDatabase.CreateFolder("Assets/Resources", "PieceSets");
+        Shader standard = Shader.Find("Standard");
+
+        if (AssetDatabase.LoadAssetAtPath<Material>(folder + "/Glow.mat") == null)
+        {
+            var glow = new Material(standard);
+            glow.EnableKeyword("_EMISSION");
+            glow.SetColor("_EmissionColor", Color.white);
+            glow.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+            AssetDatabase.CreateAsset(glow, folder + "/Glow.mat");
+        }
+
+        if (AssetDatabase.LoadAssetAtPath<Material>(folder + "/Chrome.mat") == null)
+        {
+            var chrome = new Material(standard);
+            chrome.SetFloat("_Metallic", 1f);
+            chrome.SetFloat("_Glossiness", 0.9f);
+            AssetDatabase.CreateAsset(chrome, folder + "/Chrome.mat");
+        }
+
+        if (AssetDatabase.LoadAssetAtPath<Material>(folder + "/Crystal.mat") == null)
+        {
+            // Standard shader in Fade mode
+            var crystal = new Material(standard);
+            crystal.SetFloat("_Mode", 2f);
+            crystal.SetOverrideTag("RenderType", "Transparent");
+            crystal.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            crystal.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            crystal.SetInt("_ZWrite", 0);
+            crystal.DisableKeyword("_ALPHATEST_ON");
+            crystal.EnableKeyword("_ALPHABLEND_ON");
+            crystal.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            crystal.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            crystal.color = new Color(1f, 1f, 1f, 0.55f);
+            AssetDatabase.CreateAsset(crystal, folder + "/Crystal.mat");
+        }
     }
 }

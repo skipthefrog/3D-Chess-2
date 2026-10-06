@@ -144,30 +144,28 @@ public abstract class ChessPiece : MonoBehaviour
     
     public virtual void ApplyMaterial()
     {
-        if (meshRenderer != null)
+        if (meshRenderer == null) return;
+
+        // Inspector-assigned materials win only for the Classic set
+        Material targetMaterial = null;
+        if (PieceSets.Current == PieceSets.Kind.Classic)
         {
-            Material targetMaterial = null;
-
-            // Check for assigned materials first (White and Black typically have materials assigned)
-            switch (pieceColor)
-            {
-                case PieceColor.White:
-                    targetMaterial = whiteMaterial;
-                    break;
-                case PieceColor.Black:
-                    targetMaterial = blackMaterial;
-                    break;
-                // Other colors (Green, Purple, Yellow, Orange) will use CreateDefaultMaterial()
-            }
-
-            // If no material assigned, create a default colored material
-            if (targetMaterial == null)
-            {
-                targetMaterial = CreateDefaultMaterial();
-            }
-
-            meshRenderer.material = targetMaterial;
+            if (pieceColor == PieceColor.White) targetMaterial = whiteMaterial;
+            else if (pieceColor == PieceColor.Black) targetMaterial = blackMaterial;
         }
+        if (targetMaterial == null)
+        {
+            targetMaterial = PieceSets.CreateMaterial(pieceColor);
+        }
+
+        // Every part of the piece (knights and rooks are made of two blocks), but not
+        // the selection or check indicators added later
+        foreach (MeshRenderer part in GetComponentsInChildren<MeshRenderer>(true))
+        {
+            if (part.name.Contains("Glow") || part.name.Contains("Indicator")) continue;
+            part.sharedMaterial = targetMaterial;
+        }
+        meshRenderer.material = targetMaterial;
     }
     
     protected Material CreateDefaultMaterial()

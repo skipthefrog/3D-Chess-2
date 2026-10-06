@@ -49,6 +49,14 @@ public static class Backdrops
         {
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = NeonTheme.Ground;
+            RenderSettings.skybox = null;
+            if (probe != null)
+            {
+                probe.clearFlags = UnityEngine.Rendering.ReflectionProbeClearFlags.SolidColor;
+                probe.backgroundColor = NeonTheme.Ground;
+                probe.RenderProbe();
+                UseProbeAsEnvironment();
+            }
             return true;
         }
 
@@ -89,7 +97,45 @@ public static class Backdrops
 
         RenderSettings.skybox = spaceSky;
         cam.clearFlags = CameraClearFlags.Skybox;
+        RefreshReflections();
         return true;
+    }
+
+    private static ReflectionProbe probe;
+
+    /// <summary>
+    /// Capture the sky into a reflection probe so shiny piece sets (Chrome, Crystal)
+    /// reflect the current backdrop.
+    /// </summary>
+    private static void RefreshReflections()
+    {
+        // Mobile quality levels often switch realtime probes off
+        QualitySettings.realtimeReflectionProbes = true;
+        if (probe == null)
+        {
+            var go = new GameObject("Backdrop Reflections");
+            probe = go.AddComponent<ReflectionProbe>();
+            probe.mode = UnityEngine.Rendering.ReflectionProbeMode.Realtime;
+            probe.refreshMode = UnityEngine.Rendering.ReflectionProbeRefreshMode.ViaScripting;
+            probe.timeSlicingMode = UnityEngine.Rendering.ReflectionProbeTimeSlicingMode.NoTimeSlicing;
+            probe.cullingMask = 0; // sky only
+            probe.size = new Vector3(500, 500, 500);
+            probe.resolution = 128;
+        }
+        probe.clearFlags = UnityEngine.Rendering.ReflectionProbeClearFlags.Skybox;
+        probe.RenderProbe();
+        UseProbeAsEnvironment();
+    }
+
+    // Also make the captured sky the scene's default reflection, so every renderer
+    // picks it up even outside the probe's blending
+    private static void UseProbeAsEnvironment()
+    {
+        if (probe != null && probe.realtimeTexture != null)
+        {
+            RenderSettings.defaultReflectionMode = UnityEngine.Rendering.DefaultReflectionMode.Custom;
+            RenderSettings.customReflectionTexture = probe.realtimeTexture;
+        }
     }
 
     /// <summary>Slowly turn the sky so space feels alive</summary>
