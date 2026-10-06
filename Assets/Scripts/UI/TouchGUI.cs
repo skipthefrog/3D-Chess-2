@@ -35,6 +35,7 @@ public static class TouchGUI
     public static Vector2 Begin()
     {
         currentScale = Scale;
+        if (NeonTheme.BodyFont != null) GUI.skin.font = NeonTheme.BodyFont;
         Rect safe = Screen.safeArea;
         currentOffset = new Vector2(safe.x, Screen.height - safe.yMax);
         GUI.matrix = Matrix4x4.TRS(new Vector3(currentOffset.x, currentOffset.y, 0f), Quaternion.identity, new Vector3(currentScale, currentScale, 1f));

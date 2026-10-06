@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -16,6 +18,40 @@ public static class NeonTheme
     public static readonly Color Lavender = Hex("C9B8F0");
     public static readonly Color Muted = Hex("5A3A8C");
     public static readonly Color White = Color.white;
+
+    // Fonts (Google Fonts, SIL Open Font License; files and licenses in Resources/Fonts)
+    private static Font displayFont, bodyFont;
+    private static TMP_FontAsset displayTMP, bodyTMP;
+
+    /// <summary>Bungee: chunky display face for titles</summary>
+    public static Font DisplayFont => displayFont != null ? displayFont : (displayFont = Resources.Load<Font>("Fonts/Bungee-Regular"));
+
+    /// <summary>Fredoka SemiBold: rounded face for buttons and body text</summary>
+    public static Font BodyFont => bodyFont != null ? bodyFont : (bodyFont = Resources.Load<Font>("Fonts/Fredoka-SemiBold"));
+
+    public static TMP_FontAsset DisplayTMP => displayTMP != null ? displayTMP : (displayTMP = MakeTMP(DisplayFont));
+    public static TMP_FontAsset BodyTMP => bodyTMP != null ? bodyTMP : (bodyTMP = MakeTMP(BodyFont));
+
+    private static TMP_FontAsset MakeTMP(Font font)
+    {
+        if (font == null) return null;
+        TMP_FontAsset asset = TMP_FontAsset.CreateFontAsset(font);
+        if (asset != null && TMP_Settings.defaultFontAsset != null)
+        {
+            // Characters these fonts lack (like the superscript in "4³") fall back to the default font
+            asset.fallbackFontAssetTable = new List<TMP_FontAsset> { TMP_Settings.defaultFontAsset };
+        }
+        return asset;
+    }
+
+    /// <summary>Use the neon body (or display) font on a TextMeshPro label</summary>
+    public static void ApplyFont(TMP_Text text, bool display = false)
+    {
+        TMP_FontAsset asset = display ? DisplayTMP : BodyTMP;
+        if (asset == null) return;
+        text.font = asset;
+        text.fontStyle = FontStyles.Normal; // the fonts are already heavy; no synthetic bold
+    }
 
     private static Sprite rounded;
     private static Sprite roundedOutline;
@@ -199,8 +235,9 @@ public static class NeonTheme
         {
             alignment = TextAnchor.MiddleCenter,
             fontSize = fontSize,
-            fontStyle = FontStyle.Bold,
-            wordWrap = true
+            fontStyle = BodyFont != null ? FontStyle.Normal : FontStyle.Bold,
+            wordWrap = true,
+            font = BodyFont
         };
         style.normal.textColor = outlined ? fill : Ground;
         GUI.Label(rect, text, style);
@@ -215,14 +252,16 @@ public static class NeonTheme
         GUI.DrawTexture(rect, Solid, ScaleMode.StretchToFill, true, 0, border, 2.5f, 14);
     }
 
-    public static GUIStyle GUILabelStyle(Color color, int fontSize, bool bold = true, TextAnchor anchor = TextAnchor.MiddleLeft)
+    public static GUIStyle GUILabelStyle(Color color, int fontSize, bool bold = true, TextAnchor anchor = TextAnchor.MiddleLeft, bool display = false)
     {
+        Font font = display ? DisplayFont : BodyFont;
         var style = new GUIStyle(GUI.skin.label)
         {
             fontSize = fontSize,
-            fontStyle = bold ? FontStyle.Bold : FontStyle.Normal,
+            fontStyle = bold && font == null ? FontStyle.Bold : FontStyle.Normal,
             alignment = anchor,
-            wordWrap = true
+            wordWrap = true,
+            font = font
         };
         style.normal.textColor = color;
         return style;

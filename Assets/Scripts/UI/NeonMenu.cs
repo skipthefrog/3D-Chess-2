@@ -163,8 +163,10 @@ public class NeonMenu : MonoBehaviour
         RectTransform titleBox = NewRect("Title", column);
         titleBox.sizeDelta = new Vector2(420, 58);
         TextMeshProUGUI titleShadow = NewText("Shadow", titleBox, "3D CHESS", 54, NeonTheme.Pink, TextAlignmentOptions.Left);
+        NeonTheme.ApplyFont(titleShadow, display: true);
         Stretch(titleShadow.rectTransform, new Vector2(4, -4));
         TextMeshProUGUI title = NewText("Text", titleBox, "3D CHESS", 54, NeonTheme.Lime, TextAlignmentOptions.Left);
+        NeonTheme.ApplyFont(title, display: true);
         Stretch(title.rectTransform);
         titleBox.localEulerAngles = new Vector3(0, 0, -2);
 
@@ -259,6 +261,7 @@ public class NeonMenu : MonoBehaviour
         back.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
 
         TextMeshProUGUI title = NewText("Title", header, "PICK YOUR CHAOS", 30, NeonTheme.Lime, TextAlignmentOptions.Left);
+        NeonTheme.ApplyFont(title, display: true);
         title.rectTransform.anchorMin = new Vector2(0, 0);
         title.rectTransform.anchorMax = new Vector2(1, 1);
         title.rectTransform.offsetMin = new Vector2(70, 0);
@@ -449,7 +452,9 @@ public class NeonMenu : MonoBehaviour
                 rowLayout.childControlHeight = true;
                 rowLayout.childForceExpandWidth = true;
                 rowLayout.childForceExpandHeight = true;
-                row.gameObject.AddComponent<LayoutElement>().preferredHeight = 34;
+                var rowSize = row.gameObject.AddComponent<LayoutElement>();
+                rowSize.preferredHeight = 34;
+                rowSize.flexibleHeight = 0;
             }
 
             int index = i;
@@ -598,6 +603,7 @@ public class NeonMenu : MonoBehaviour
         tmp.text = text;
         tmp.fontSize = size;
         tmp.fontStyle = FontStyles.Bold;
+        NeonTheme.ApplyFont(tmp);
         tmp.color = color;
         tmp.alignment = alignment;
         tmp.raycastTarget = false;

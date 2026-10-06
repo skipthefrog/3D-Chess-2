@@ -92,7 +92,7 @@ public class HowToPlayUI : MonoBehaviour
         Rect panel = new Rect(margin, 15f, ui.x - margin * 2, ui.y - 30f);
         NeonTheme.GUIPanel(panel, NeonTheme.Cyan, 0.96f);
 
-        GUI.Label(new Rect(panel.x, panel.y + 6f, panel.width, 30f), "HOW TO PLAY", NeonTheme.GUILabelStyle(NeonTheme.Lime, 22, true, TextAnchor.MiddleCenter));
+        GUI.Label(new Rect(panel.x, panel.y + 6f, panel.width, 30f), "HOW TO PLAY", NeonTheme.GUILabelStyle(NeonTheme.Lime, 22, true, TextAnchor.MiddleCenter, display: true));
 
         GUIStyle body = NeonTheme.GUILabelStyle(NeonTheme.White, 12, false, TextAnchor.UpperLeft);
         float columnWidth = (panel.width - 48f) / 2f;

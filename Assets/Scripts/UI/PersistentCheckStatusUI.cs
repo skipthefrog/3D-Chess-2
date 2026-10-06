@@ -203,6 +203,7 @@ public class PersistentCheckStatusUI : MonoBehaviour
         statusText.fontStyle = FontStyle.Bold;
         statusText.alignment = TextAnchor.MiddleCenter;
         statusText.color = NeonTheme.Lime;
+        if (NeonTheme.BodyFont != null) statusText.font = NeonTheme.BodyFont;
         
         RectTransform textRect = textObject.GetComponent<RectTransform>();
         textRect.anchorMin = Vector2.zero;
