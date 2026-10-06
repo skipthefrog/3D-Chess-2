@@ -2788,6 +2788,39 @@ public class PlacementManager : MonoBehaviour
     /// Execute AI placement without interfering with human selection
     /// This is the protected version that should be called by AI
     /// </summary>
+    /// <summary>
+    /// Place every piece still in a player's tray, using the AI placement engine to
+    /// pick sensible squares. Lets a human skip placing pieces one at a time.
+    /// </summary>
+    public void AutoPlaceRemaining(PieceColor playerColor)
+    {
+        if (isAutoPlacing) return;
+        StartCoroutine(AutoPlaceRemainingRoutine(playerColor));
+    }
+
+    public bool IsAutoPlacing => isAutoPlacing;
+    private bool isAutoPlacing;
+
+    private System.Collections.IEnumerator AutoPlaceRemainingRoutine(PieceColor playerColor)
+    {
+        isAutoPlacing = true;
+        if (selectedTrayPiece != null && selectedTrayPiece.pieceColor == playerColor)
+        {
+            DeselectTrayPiece();
+        }
+
+        var engine = new AIPlacementEngine(AIDifficulty.Hard);
+        // Guard against looping forever if a placement is rejected
+        for (int i = 0; i < 64 && !IsPlayerPlacementCompleted(playerColor); i++)
+        {
+            AIPlacement placement = engine.FindBestPlacement(playerColor);
+            if (placement == null || placement.piece == null) break;
+            ExecuteAIPlacement(placement.piece, placement.position);
+            yield return new WaitForSeconds(0.12f); // let each piece land visibly
+        }
+        isAutoPlacing = false;
+    }
+
     public void ExecuteAIPlacement(ChessPiece aiPiece, BoardPosition targetPosition)
     {
         Debug.Log($"🤖 PlacementManager: ExecuteAIPlacement ENTRY - {aiPiece.pieceColor} {aiPiece.pieceType} at {targetPosition}");

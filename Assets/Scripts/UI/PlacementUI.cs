@@ -20,7 +20,7 @@ public class PlacementUI : MonoBehaviour
     private void Start()
     {
         // Calculate UI positions
-        deselectButtonRect = new Rect(20, 140, buttonWidth, buttonHeight);
+        deselectButtonRect = new Rect(20, 200, buttonWidth, buttonHeight);
         stateInfoRect = new Rect(20, 80, buttonWidth * 3, 55);
 
         // Calculate ready button positions dynamically based on player count
@@ -130,11 +130,9 @@ public class PlacementUI : MonoBehaviour
 
         // Layout is authored at 160 dpi; scale it up on high-density screens (phones)
         // and keep it inside the safe area so the notch and home indicator don't cover it
-        float uiScale = GetUIScale();
-        Rect safe = Screen.safeArea;
-        GUI.matrix = Matrix4x4.TRS(new Vector3(safe.x, Screen.height - safe.yMax, 0f), Quaternion.identity, new Vector3(uiScale, uiScale, 1f));
-        float uiWidth = safe.width / uiScale;
-        float uiHeight = safe.height / uiScale;
+        Vector2 uiSize = TouchGUI.Begin();
+        float uiWidth = uiSize.x;
+        float uiHeight = uiSize.y;
 
         // Set GUI style
         GUI.skin.button.fontSize = 14; // Reduced from 16 for better fit in narrow buttons
@@ -154,10 +152,12 @@ public class PlacementUI : MonoBehaviour
             // MULTI-PLAYER SUPPORT: Always show individual ready buttons for all active players
             ShowMultiPlayerReadyButtons();
 
+            ShowAutoPlaceButtons();
+
             // Deselect button - only show if a piece is selected
             if (PlacementManager.Instance != null && HasSelectedTrayPiece())
             {
-                if (GUI.Button(deselectButtonRect, "Deselect Piece"))
+                if (TouchGUI.Button(deselectButtonRect, "Deselect Piece"))
                 {
                     OnDeselectButtonClicked();
                 }
@@ -174,14 +174,30 @@ public class PlacementUI : MonoBehaviour
             GUI.Label(instructionsRect, instructions);
         }
 
-        GUI.matrix = Matrix4x4.identity;
+        TouchGUI.End();
     }
 
-    private static float GetUIScale()
+    /// <summary>
+    /// One "Auto-place" button per human player who still has pieces in their tray
+    /// </summary>
+    private void ShowAutoPlaceButtons()
     {
-        float dpi = Screen.dpi > 0f ? Screen.dpi : 160f;
-        return Mathf.Clamp(dpi / 160f, 1f, 3f);
+        if (PlacementManager.Instance == null || PlacementManager.Instance.IsAutoPlacing) return;
+
+        foreach (var entry in playerReadyButtonRects)
+        {
+            PieceColor player = entry.Key;
+            bool isHuman = TurnManager.Instance == null || !TurnManager.Instance.IsPlayerAI(player);
+            if (!isHuman || PlacementManager.Instance.IsPlayerPlacementCompleted(player)) continue;
+
+            Rect rect = new Rect(entry.Value.x, 140, entry.Value.width, buttonHeight);
+            if (TouchGUI.Button(rect, $"Auto-place {player}"))
+            {
+                PlacementManager.Instance.AutoPlaceRemaining(player);
+            }
+        }
     }
+
     
     /// <summary>
     /// Get color-tinted grey background color for a player (not ready state)
@@ -313,7 +329,7 @@ public class PlacementUI : MonoBehaviour
             string buttonText;
             if (playerReady)
             {
-                buttonText = $"{colorName}\nReady ✓";  // e.g., "White\nReady ✓"
+                buttonText = $"{colorName}\nReady";  // e.g., "White\nReady"
             }
             else if (allPiecesPlaced)
             {
@@ -345,7 +361,7 @@ public class PlacementUI : MonoBehaviour
             GUI.backgroundColor = buttonColor;
 
             // Draw button
-            if (GUI.Button(playerReadyButtonRects[player], buttonText))
+            if (TouchGUI.Button(playerReadyButtonRects[player], buttonText))
             {
                 OnPlayerReadyButtonClicked(player);
             }

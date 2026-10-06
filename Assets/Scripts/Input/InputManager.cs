@@ -171,6 +171,12 @@ public class InputManager : MonoBehaviour
     
     private void ProcessTouch(Vector2 screenPosition)
     {
+        // A tap on an on-screen button must not also select or place on the board behind it
+        if (TouchGUI.IsOverUI(screenPosition))
+        {
+            return;
+        }
+
         // Check if game state allows any interaction
         if (GameStateManager.Instance == null)
         {
