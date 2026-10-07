@@ -1,0 +1,20 @@
+name = "3d-chess"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# Room = one game; Matchmaker = the Find Match queue. SQLite-backed Durable
+# Objects are the kind available on Cloudflare's free plan.
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+[[durable_objects.bindings]]
+name = "MATCHMAKER"
+class_name = "Matchmaker"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room", "Matchmaker"]
+
+# TOKEN_SECRET is a secret: set it with `npx wrangler secret put TOKEN_SECRET`.
+# For local development it comes from .dev.vars (not committed).

@@ -1,0 +1,21 @@
+{
+  "name": "3d-chess-server-cf",
+  "version": "1.0.0",
+  "private": true,
+  "description": "3D Chess game server on Cloudflare Workers + Durable Objects",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test:rules": "vitest run src/__tests__",
+    "test:e2e": "node scripts/e2e.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261007.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.148.0",
+    "ws": "^8.22.0"
+  }
+}
