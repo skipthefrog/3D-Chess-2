@@ -351,25 +351,69 @@ public class DesertDunes : MonoBehaviour
         }
     }
 
+    // A handful of lone dunes on an otherwise calm plain: (x, z, length, width, height, angle)
+    private (float x, float z, float length, float width, float height, float angle)[] dunes;
+
+    private void PlaceDunes()
+    {
+        var rng = new System.Random(42);
+        dunes = new (float, float, float, float, float, float)[7];
+        for (int i = 0; i < dunes.Length; i++)
+        {
+            // Spread around the board, never close to it
+            float angle = (float)(i * Math.PI * 2 / dunes.Length + rng.NextDouble() * 0.6);
+            float dist = 95f + (float)rng.NextDouble() * 150f;
+            dunes[i] = (Mathf.Cos(angle) * dist, Mathf.Sin(angle) * dist,
+                        28f + (float)rng.NextDouble() * 30f,   // along the wind
+                        45f + (float)rng.NextDouble() * 45f,   // across the wind (crescent width)
+                        12f + (float)rng.NextDouble() * 12f,
+                        (float)(rng.NextDouble() * 0.5 - 0.25));
+        }
+    }
+
+    /// <summary>Sand height at a point (local to the dune field)</summary>
+    public float HeightAt(float x, float z, float time)
+    {
+        // Calm plain with a very gentle swell
+        float h = 0.8f * Mathf.Sin(x * 0.013f + 0.7f) * Mathf.Sin(z * 0.011f + 1.9f);
+
+        float drift = time * 0.35f; // dunes creep slowly downwind (+x)
+        foreach (var d in dunes)
+        {
+            float dx = x - (d.x + drift), dz = z - d.z;
+            float cos = Mathf.Cos(d.angle), sin = Mathf.Sin(d.angle);
+            float along = dx * cos + dz * sin;
+            float across = -dx * sin + dz * cos;
+            // Gentle windward slope, steep lee face, horns curving downwind at the edges
+            along -= 0.25f * across * across / d.width;
+            float a = along < 0f ? d.length : d.length * 0.45f;
+            float e = (along * along) / (a * a) + (across * across) / (d.width * d.width);
+            if (e < 9f) h += d.height * Mathf.Exp(-e * 1.4f);
+        }
+
+        // Keep it flat right under the board
+        float r = Mathf.Sqrt(x * x + z * z);
+        return h * Mathf.Clamp01((r - 30f) / 40f);
+    }
+
     private void Shape(float time)
     {
-        float drift = time * 0.6f; // dunes migrate slowly downwind
+        if (dunes == null) PlaceDunes();
         for (int i = 0; i < vertices.Length; i++)
         {
-            float x = vertices[i].x, z = vertices[i].z;
-            float wx = x + drift;
-            // Long crescent ridges, crossed by smaller dunes
-            float h = 9f * Ridge((wx * 0.6f + z * 0.8f) * 0.018f + 0.6f * Mathf.Sin(z * 0.011f))
-                    + 4f * Ridge((wx * 0.9f - z * 0.4f) * 0.035f + 0.4f * Mathf.Sin(wx * 0.02f))
-                    + 1.5f * Mathf.Sin(wx * 0.09f + z * 0.05f);
-            // Flatten right under the board so dunes never poke into view up close
-            float r = Mathf.Sqrt(x * x + z * z);
-            h *= Mathf.Clamp01((r - 25f) / 60f);
-            vertices[i].y = h;
+            vertices[i].y = HeightAt(vertices[i].x, vertices[i].z, time);
         }
         mesh.vertices = vertices;
         mesh.RecalculateNormals();
         mesh.RecalculateBounds();
+        cacti?.Settle(this, time);
+    }
+
+    private DesertCacti cacti;
+
+    private void Awake()
+    {
+        cacti = gameObject.AddComponent<DesertCacti>();
     }
 
     // Sharp-crested, smooth-backed dune profile in 0..1
@@ -377,6 +421,83 @@ public class DesertDunes : MonoBehaviour
     {
         float s = 0.5f + 0.5f * Mathf.Sin(p * Mathf.PI * 2f);
         return s * s;
+    }
+}
+
+/// <summary>
+/// A sprinkling of neon saguaro cacti standing on the sand. They follow the ground as
+/// the dunes shift so they never float or sink.
+/// </summary>
+public class DesertCacti : MonoBehaviour
+{
+    private readonly System.Collections.Generic.List<(Transform t, float x, float z)> cacti =
+        new System.Collections.Generic.List<(Transform, float, float)>();
+
+    private void Start()
+    {
+        var rng = new System.Random(11);
+
+        Material skin = Resources.Load<Material>("PieceSets/Glow");
+        skin = skin != null ? new Material(skin) : new Material(Shader.Find("Standard"));
+        skin.color = new Color(0.07f, 0.32f, 0.3f);
+        skin.EnableKeyword("_EMISSION");
+        skin.SetColor("_EmissionColor", new Color(0.05f, 0.55f, 0.5f) * 0.55f); // soft neon glow
+        skin.SetFloat("_Metallic", 0f);
+        skin.SetFloat("_Glossiness", 0.3f);
+
+        int count = 11;
+        for (int i = 0; i < count; i++)
+        {
+            float angle = (float)(rng.NextDouble() * Math.PI * 2);
+            float dist = 60f + (float)rng.NextDouble() * 170f;
+            float x = Mathf.Cos(angle) * dist, z = Mathf.Sin(angle) * dist;
+            float scale = 1.8f + (float)rng.NextDouble() * 1.4f; // big enough to read from the board
+            int arms = rng.Next(0, 3);
+            Transform cactus = BuildCactus(skin, scale, arms, (float)rng.NextDouble() * 360f, rng);
+            cactus.SetParent(transform, false);
+            cacti.Add((cactus, x, z));
+        }
+    }
+
+    public void Settle(DesertDunes ground, float time)
+    {
+        foreach (var c in cacti)
+        {
+            if (c.t == null) continue;
+            c.t.localPosition = new Vector3(c.x, ground.HeightAt(c.x, c.z, time) - 0.4f, c.z);
+        }
+    }
+
+    private static Transform BuildCactus(Material skin, float scale, int arms, float yaw, System.Random rng)
+    {
+        var root = new GameObject("Cactus").transform;
+        root.localRotation = Quaternion.Euler(0f, yaw, 0f);
+        root.localScale = Vector3.one * scale;
+
+        Part(root, skin, new Vector3(0f, 5f, 0f), new Vector3(1.6f, 5f, 1.6f));       // trunk, ~10 tall
+        for (int a = 0; a < arms; a++)
+        {
+            float side = a == 0 ? 1f : -1f;
+            float y = 3.2f + (float)rng.NextDouble() * 2.5f;
+            float up = 2.2f + (float)rng.NextDouble() * 1.5f;
+            // elbow reaching out, then the arm rising
+            Part(root, skin, new Vector3(side * 1.4f, y, 0f), new Vector3(1.0f, 1.0f, 1.0f), Quaternion.Euler(0f, 0f, 90f), 1.6f);
+            Part(root, skin, new Vector3(side * 2.4f, y + up * 0.5f, 0f), new Vector3(1.1f, up * 0.6f, 1.1f));
+        }
+        return root;
+    }
+
+    private static void Part(Transform parent, Material skin, Vector3 position, Vector3 size, Quaternion? rotation = null, float length = 0f)
+    {
+        GameObject part = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        UnityEngine.Object.Destroy(part.GetComponent<Collider>());
+        part.transform.SetParent(parent, false);
+        part.transform.localPosition = position;
+        if (rotation.HasValue) part.transform.localRotation = rotation.Value;
+        part.transform.localScale = length > 0f ? new Vector3(size.x, length, size.z) : size;
+        var r = part.GetComponent<MeshRenderer>();
+        r.sharedMaterial = skin;
+        r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
     }
 }
 
