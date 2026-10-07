@@ -14,7 +14,7 @@ using UnityEngine.Networking;
 public class OnlineClient : MonoBehaviour
 {
     // Production server. Development builds can override with PlayerPrefs "ServerUrl".
-    public const string DefaultServerUrl = "https://3d-chess.skipthefrog.workers.dev";
+    public const string DefaultServerUrl = "https://3d-chess.bomsapostudios.workers.dev";
 
     public static OnlineClient Instance { get; private set; }
 
