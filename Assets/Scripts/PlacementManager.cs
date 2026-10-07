@@ -212,6 +212,13 @@ public class PlacementManager : MonoBehaviour
     {
         bool previousState = IsPlayerReady(playerColor);
 
+        if (OnlineSession.IsActive)
+        {
+            if (!OnlineSession.CanControl(playerColor)) return;  // only the server marks the other side ready
+            if (previousState && !ready) return;                  // can't take back "ready" online
+            if (ready && !previousState && OnlineSession.ShouldSend(playerColor)) OnlineClient.Instance.SendReady();
+        }
+
         // Determine if this is human manual or AI auto-ready
         string playerType = TurnManager.Instance?.IsPlayerAI(playerColor) == true ? "AI (auto)" : "HUMAN (manual)";
 
@@ -466,6 +473,7 @@ public class PlacementManager : MonoBehaviour
     /// </summary>
     public void OnTrayPieceClicked(ChessPiece piece)
     {
+        if (!OnlineSession.CanControl(piece.pieceColor)) return; // the other player's pieces
         Debug.Log($"🎯 PlacementManager: Tray piece clicked - {piece.pieceColor} {piece.pieceType}");
         
         // SELECTION STATE DEBUGGING: Identify if this is human or AI selection
@@ -618,6 +626,7 @@ public class PlacementManager : MonoBehaviour
     /// </summary>
     public void OnBoardPieceClickedForRepositioning(ChessPiece piece)
     {
+        if (OnlineSession.IsActive) return; // placements are final in online games
         if (piece == null)
         {
             Debug.LogError("PlacementManager: Cannot reposition null piece");
@@ -1423,6 +1432,12 @@ public class PlacementManager : MonoBehaviour
             PlacementVisibilityManager.Instance.OnPiecePlaced(piece);
         }
         
+        // Online: tell the server (it re-checks the placement)
+        if (OnlineSession.ShouldSend(piece.pieceColor))
+        {
+            OnlineClient.Instance.SendPlacePiece(piece.pieceType, position);
+        }
+
         // Check if placement phase should end (when BOTH players complete)
         CheckPlacementCompletion();
         
@@ -2794,6 +2809,7 @@ public class PlacementManager : MonoBehaviour
     /// </summary>
     public void AutoPlaceRemaining(PieceColor playerColor)
     {
+        if (!OnlineSession.CanControl(playerColor)) return;
         if (isAutoPlacing) return;
         StartCoroutine(AutoPlaceRemainingRoutine(playerColor));
     }

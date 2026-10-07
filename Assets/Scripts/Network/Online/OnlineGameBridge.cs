@@ -1,0 +1,213 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+/// <summary>
+/// Plays the other player's actions from the server into the local game during an
+/// online match: their placements, ready, moves, promotions and resignation. Also
+/// shows connection status and reconnects to the room if the connection drops.
+/// Local actions are sent by hooks in PlacementManager, ChessBoard and friends.
+/// </summary>
+public class OnlineGameBridge : MonoBehaviour
+{
+    public static OnlineGameBridge Instance { get; private set; }
+
+    private readonly Queue<ServerMessage> backlog = new Queue<ServerMessage>();
+    private string banner;
+    private float bannerUntil;
+    private bool reconnecting;
+    private bool gameOverShown;
+
+    public static void Begin()
+    {
+        if (Instance != null) Destroy(Instance.gameObject);
+        var go = new GameObject("Online Game Bridge");
+        DontDestroyOnLoad(go);
+        Instance = go.AddComponent<OnlineGameBridge>();
+    }
+
+    private void OnEnable()
+    {
+        var client = OnlineClient.Instance;
+        if (client == null) return;
+        client.OnMessage += Receive;
+        client.OnClosed += Lost;
+    }
+
+    private void OnDisable()
+    {
+        var client = OnlineClient.Instance;
+        if (client == null) return;
+        client.OnMessage -= Receive;
+        client.OnClosed -= Lost;
+    }
+
+    private void Update()
+    {
+        if (!OnlineSession.IsActive)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        // Messages can arrive before the game scene has finished building; replay them once it has
+        while (backlog.Count > 0 && GameReady())
+        {
+            Apply(backlog.Dequeue());
+        }
+    }
+
+    private static bool GameReady() =>
+        ChessBoard.Instance != null && PlacementManager.Instance != null && TurnManager.Instance != null &&
+        GameStateManager.Instance != null && PieceTray.GetTrayForColor(PieceColor.Black) != null;
+
+    private void Receive(ServerMessage msg)
+    {
+        if (GameReady() && backlog.Count == 0) Apply(msg);
+        else backlog.Enqueue(msg);
+    }
+
+    // ───────────────────────── Applying the other player's actions ─────────────────────────
+
+    private void Apply(ServerMessage msg)
+    {
+        PieceColor? color = Enum.TryParse(msg.color, out PieceColor c) ? c : (PieceColor?)null;
+        bool fromOpponent = color.HasValue && color.Value != OnlineSession.LocalColor;
+
+        switch (msg.type)
+        {
+            case "game:piecePlaced":
+                if (fromOpponent && Enum.TryParse(msg.pieceType, out ChessPieceType placedType))
+                    Remote(() => PlaceFromTray(color.Value, placedType, msg.position.ToBoard()));
+                break;
+
+            case "game:playerReady":
+                if (fromOpponent) Remote(() => PlacementManager.Instance.SetPlayerReady(color.Value, true));
+                break;
+
+            case "game:moveValidated":
+                if (fromOpponent) Remote(() => ChessBoard.Instance.MovePiece(msg.from.ToBoard(), msg.to.ToBoard()));
+                break;
+
+            case "game:pawnPromoted":
+                if (fromOpponent && Enum.TryParse(msg.pieceType, out ChessPieceType promoted) && PawnPromotionManager.Instance != null)
+                    Remote(() => PawnPromotionManager.Instance.ApplyRemotePromotion(promoted));
+                break;
+
+            case "game:moveRejected":
+                // The server's rules disagreed with this device's; say so plainly
+                Show($"The server didn't accept that move ({msg.error}).", 6f);
+                break;
+
+            case "game:over":
+                HandleGameOver(msg);
+                break;
+
+            case "room:playerLeft":
+                if (fromOpponent) Show("Your opponent disconnected. Waiting for them to come back…", 120f);
+                break;
+
+            case "room:playerReconnected":
+                if (fromOpponent) Show("Your opponent is back!", 3f);
+                break;
+
+            case "room:joined":
+                if (reconnecting)
+                {
+                    reconnecting = false;
+                    Show("Reconnected", 2f);
+                }
+                break;
+        }
+    }
+
+    private static void Remote(Action action)
+    {
+        OnlineSession.ApplyingRemote = true;
+        try { action(); }
+        catch (Exception e) { Debug.LogError($"OnlineGameBridge: applying remote action failed: {e}"); }
+        finally { OnlineSession.ApplyingRemote = false; }
+    }
+
+    private static void PlaceFromTray(PieceColor color, ChessPieceType type, BoardPosition position)
+    {
+        PieceTray tray = PieceTray.GetTrayForColor(color);
+        ChessPiece piece = tray != null
+            ? tray.GetComponentsInChildren<ChessPiece>(true).FirstOrDefault(p => p.pieceType == type)
+            : null;
+        if (piece == null)
+        {
+            Debug.LogError($"OnlineGameBridge: no {color} {type} left in the tray to place at {position}");
+            return;
+        }
+        PlacementManager.Instance.ExecuteAIPlacement(piece, position);
+    }
+
+    private void HandleGameOver(ServerMessage msg)
+    {
+        if (gameOverShown) return;
+        gameOverShown = true;
+        // Checkmate and stalemate are detected by the local game too. Resignation,
+        // abandonment and timeouts only happen on the other device, so apply them here.
+        bool weWon = msg.winner == OnlineSession.LocalColor.ToString();
+        if (weWon && (msg.reason == "resignation" || msg.reason == "timeout"))
+        {
+            PieceColor loser = OnlineSession.LocalColor == PieceColor.White ? PieceColor.Black : PieceColor.White;
+            if (GameEndDetectionManager.Instance != null && GameStateManager.Instance.currentState != GameState.GameOver)
+                Remote(() => GameEndDetectionManager.Instance.HandleForfeit(loser));
+        }
+    }
+
+    // ───────────────────────── Connection ─────────────────────────
+
+    private void Lost(string reason)
+    {
+        if (!OnlineSession.IsActive) return;
+        Show("Connection lost. Reconnecting…", 60f);
+        Resync();
+    }
+
+    private void Resync()
+    {
+        if (reconnecting) return;
+        reconnecting = true;
+        StartCoroutine(ReconnectLoop());
+    }
+
+    private IEnumerator ReconnectLoop()
+    {
+        var client = OnlineClient.Instance;
+        for (int attempt = 0; attempt < 20 && reconnecting && OnlineSession.IsActive; attempt++)
+        {
+            client.JoinRoom(client.RoomCode);
+            yield return new WaitForSeconds(3f);
+            if (client.IsConnected) yield break;
+        }
+        if (reconnecting) Show("Couldn't reconnect. Check your internet and return to the menu.", 30f);
+    }
+
+    private void Show(string text, float seconds)
+    {
+        banner = text;
+        bannerUntil = Time.time + seconds;
+    }
+
+    private void OnGUI()
+    {
+        Vector2 ui = TouchGUI.Begin();
+        GUI.depth = -5;
+
+        // Who you are, so it's clear which side to play
+        string you = $"Online · You are {OnlineSession.LocalColor}";
+        GUI.Label(new Rect(20, ui.y - 34, 300, 24), you, NeonTheme.GUILabelStyle(NeonTheme.Cyan, 14));
+
+        if (!string.IsNullOrEmpty(banner) && Time.time < bannerUntil)
+        {
+            Rect rect = new Rect(ui.x / 2f - 220f, 60f, 440f, 44f);
+            NeonTheme.GUIPanel(rect, NeonTheme.Yellow, 0.95f);
+            GUI.Label(rect, banner, NeonTheme.GUILabelStyle(NeonTheme.Yellow, 14, true, TextAnchor.MiddleCenter));
+        }
+        TouchGUI.End();
+    }
+}

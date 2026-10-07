@@ -95,12 +95,15 @@ await a.request({ type: 'game:ready' });
 await b.request({ type: 'game:ready' });
 const started = await a.wait(m => m.type === 'game:phaseChanged' && m.phase === 'playing');
 check(!!started, 'game starts when both are ready');
+const startState = (await a.request({ type: 'room:state' })).state;
+const pawnAt = (x, y, z) => startState.board[x][y][z]?.type === 'Pawn';
+check(pawnAt(1, 0, 0) && pawnAt(1, 3, 3) && pawnAt(2, 3, 3), 'a pawn spawns in front of each placed piece (like the game)');
 
 // Moves
-const outOfTurn = await b.request({ type: 'game:move', from: { x: 3, y: 3, z: 3 }, to: { x: 2, y: 3, z: 3 } });
+const outOfTurn = await b.request({ type: 'game:move', from: { x: 3, y: 3, z: 3 }, to: { x: 3, y: 2, z: 3 } });
 check(!outOfTurn.ok, `moving out of turn is refused (${outOfTurn.error})`);
-const m1 = await a.request({ type: 'game:move', from: { x: 0, y: 0, z: 0 }, to: { x: 1, y: 0, z: 0 } });
-check(m1.ok, 'White moves King');
+const m1 = await a.request({ type: 'game:move', from: { x: 1, y: 0, z: 0 }, to: { x: 2, y: 0, z: 0 } });
+check(m1.ok, `White moves a pawn${m1.ok ? '' : ` (${m1.error})`}`);
 const seen = await b.wait(m => m.type === 'game:moveValidated' && m.color === 'White');
 check(!!seen, 'Black sees White\'s move');
 const illegal = await b.request({ type: 'game:move', from: { x: 3, y: 3, z: 3 }, to: { x: 0, y: 0, z: 0 } });
@@ -112,7 +115,6 @@ await a.wait(m => m.type === 'room:playerLeft' && m.color === 'Black');
 const b2 = await client(`${WS_BASE}/rooms/${room.code}/connect?token=${bob.token}`);
 const back = await b2.wait(m => m.type === 'room:joined');
 check(back.yourColor === 'Black' && back.state.turnNumber >= 1, 'reconnect keeps seat and game state');
-// Black's king is in check from White's rook along x, so step off that line
 const m2 = await b2.request({ type: 'game:move', from: { x: 3, y: 3, z: 3 }, to: { x: 3, y: 2, z: 3 } });
 check(m2.ok, `Black moves after reconnecting${m2.ok ? '' : ` (${m2.error})`}`);
 

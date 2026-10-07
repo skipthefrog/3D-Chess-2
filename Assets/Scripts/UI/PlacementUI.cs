@@ -189,7 +189,7 @@ public class PlacementUI : MonoBehaviour
         {
             PieceColor player = entry.Key;
             bool isHuman = TurnManager.Instance == null || !TurnManager.Instance.IsPlayerAI(player);
-            if (!isHuman || PlacementManager.Instance.IsPlayerPlacementCompleted(player)) continue;
+            if (!isHuman || !OnlineSession.CanControl(player) || PlacementManager.Instance.IsPlayerPlacementCompleted(player)) continue;
 
             Rect rect = new Rect(entry.Value.x, 140, entry.Value.width, buttonHeight);
             if (TouchGUI.NeonButton(rect, $"Auto-place {player}", NeonTheme.Yellow, NeonTheme.Pink))

@@ -84,6 +84,10 @@ export class Room extends DurableObject<Env> {
         config: state.config,
         players: state.players.map(p => ({ name: p.username, color: p.color, connected: p.isConnected })),
         openSeats: state.config.playerCount - state.players.length,
+        currentTurn: state.currentTurn,
+        turnNumber: state.turnNumber,
+        lastMove: state.moveHistory[state.moveHistory.length - 1] ?? null,
+        pieces: state.board.flat(2).filter(Boolean).map(p => `${p!.color[0]}${p!.type}@${p!.position.x},${p!.position.y},${p!.position.z}`),
       });
     }
 
@@ -148,8 +152,10 @@ export class Room extends DurableObject<Env> {
       return this.send(ws, { type: 'error', error: 'Bad JSON' });
     }
     const requestId = msg.requestId;
-    const reply = (ok: boolean, error?: string, extra: object = {}) =>
+    const reply = (ok: boolean, error?: string, extra: object = {}) => {
+      if (!ok) console.log(`[room ${this.meta?.code}] ${me.color} ${String(msg.type)} refused: ${error} ${JSON.stringify(msg)}`);
       this.send(ws, { type: 'ack', requestId, ok, ...(error ? { error } : {}), ...extra });
+    };
 
     const engine = this.engine;
     if (!engine) return reply(false, 'Room not found');
@@ -166,12 +172,14 @@ export class Room extends DurableObject<Env> {
         if (!result.success) return reply(false, result.error);
         await this.persist();
         reply(true);
+        this.broadcast({ type: 'game:piecePlaced', color: me.color, pieceType: msg.pieceType, position: msg.position });
         return this.broadcast({ type: 'game:stateUpdate', reason: 'placement', state: this.stateForClients() });
       }
 
       case 'game:ready': {
         if (engine.getState().phase !== 'placement') return reply(false, 'Not in placement phase');
         engine.completePlacement(me.color);
+        this.broadcast({ type: 'game:playerReady', color: me.color });
         if (engine.allPlacementsComplete()) {
           engine.startGame();
           this.startTurnClock();

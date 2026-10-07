@@ -164,10 +164,36 @@ export class GameEngine {
   startGame(): boolean {
     if (this.phase !== 'placement') return false;
     if (!this.allPlacementsComplete()) return false;
+    this.spawnPawns();
     this.phase = 'playing';
     this.currentTurn = this.getActiveColors()[0]; // White starts
     this.positionHistory.push(this.board.hash());
     return true;
+  }
+
+  /**
+   * Matches the Unity client: when play starts, each placed non-pawn piece gets a
+   * pawn on the cell directly in front of it (one step along its advance axis),
+   * if that cell is on the board and empty.
+   */
+  private spawnPawns(): void {
+    const n = this.board.size;
+    const placed: { color: PlayerColor; position: BoardPosition }[] = [];
+    for (let x = 0; x < n; x++) {
+      for (let y = 0; y < n; y++) {
+        for (let z = 0; z < n; z++) {
+          const piece = this.board.getPiece({ x, y, z });
+          if (piece && piece.type !== 'Pawn') placed.push({ color: piece.color, position: { x, y, z } });
+        }
+      }
+    }
+    for (const { color, position } of placed) {
+      const { axis, direction } = PLAYER_ADVANCE[color];
+      const front = { ...position, [axis]: position[axis] + direction } as BoardPosition;
+      if (this.board.isInBounds(front) && this.board.isEmpty(front)) {
+        this.board.placePiece(front, 'Pawn', color);
+      }
+    }
   }
 
   // ── Piece placement phase ────────────────────────────────────────────────────

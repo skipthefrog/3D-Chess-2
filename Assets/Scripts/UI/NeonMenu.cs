@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using TMPro;
@@ -56,7 +57,11 @@ public class NeonMenu : MonoBehaviour
         BuildMenuScreen();
         BuildSetupScreen();
         BuildCustomizeScreen();
+        BuildOnlineScreen();
         ShowMenu();
+
+        // Coming back to the menu from an online game ends the session
+        if (OnlineSession.IsActive && OnlineClient.Instance != null) OnlineClient.Instance.LeaveOnline();
 
         // The old menu builds its UI in its own Start; hide it once it exists
         yield return null;
@@ -184,8 +189,7 @@ public class NeonMenu : MonoBehaviour
         rowLayout.childControlHeight = false;
         rowLayout.childForceExpandWidth = false;
         NeonButton(row, "Local Game", new Vector2(178, 52), NeonTheme.Lime, NeonTheme.Pink, 1f, 18, ShowSetup);
-        NeonButton(row, "Online Game", new Vector2(178, 52), NeonTheme.Yellow, NeonTheme.Cyan, -1f, 18,
-            () => ShowToast("Online play is coming soon!"));
+        NeonButton(row, "Online Game", new Vector2(178, 52), NeonTheme.Yellow, NeonTheme.Cyan, -1f, 18, ShowOnline);
 
         NeonButton(column, "Customize: pieces & backdrops", new Vector2(370, 44), NeonTheme.Cyan, NeonTheme.Pink, 0.5f, 16, ShowCustomize);
 
@@ -609,6 +613,261 @@ public class NeonMenu : MonoBehaviour
         backdropNote.text = Backdrops.Description(Backdrops.Current);
     }
 
+    // ───────────────────────── Online ─────────────────────────
+
+    private GameObject onlineScreen;
+    private TMP_InputField nameInput, codeInput;
+    private TextMeshProUGUI onlineStatus;
+    private bool onlineBusy;
+    private bool onlineStarting;
+
+    private void BuildOnlineScreen()
+    {
+        onlineScreen = NewRect("Online Screen", safeRoot).gameObject;
+        RectTransform root = onlineScreen.GetComponent<RectTransform>();
+        Stretch(root);
+
+        RectTransform header = NewRect("Header", root);
+        header.anchorMin = new Vector2(0, 1);
+        header.anchorMax = new Vector2(1, 1);
+        header.pivot = new Vector2(0.5f, 1);
+        header.offsetMin = new Vector2(16, -64);
+        header.offsetMax = new Vector2(-24, -12);
+
+        Button back = NeonButton(header, "<", new Vector2(48, 48), NeonTheme.Cyan, NeonTheme.Pink, 0f, 24, LeaveOnlineScreen);
+        Place((RectTransform)back.transform, new Vector2(0, 0.5f), new Vector2(48, 48), new Vector2(28, 0));
+
+        TextMeshProUGUI title = NewText("Title", header, "PLAY ONLINE", 30, NeonTheme.Lime, TextAlignmentOptions.Left);
+        NeonTheme.ApplyFont(title, display: true);
+        title.rectTransform.anchorMin = new Vector2(0, 0);
+        title.rectTransform.anchorMax = new Vector2(1, 1);
+        title.rectTransform.offsetMin = new Vector2(70, 0);
+        title.rectTransform.offsetMax = new Vector2(-20, 0);
+
+        RectTransform left = Card(root, "Friend Card", NeonTheme.Cyan, new Vector2(0f, 0f), new Vector2(0.5f, 1f), new Vector2(16, 60), new Vector2(-8, -74));
+        RectTransform right = Card(root, "Match Card", NeonTheme.Pink, new Vector2(0.5f, 0f), new Vector2(1f, 1f), new Vector2(8, 60), new Vector2(-24, -74));
+
+        SectionLabel(left, "Your name", NeonTheme.Cyan);
+        nameInput = InputField(left, "Name", PlayerPrefs.GetString("OnlineName", ""), 20);
+        SectionLabel(left, "Play a friend", NeonTheme.Cyan);
+        RectTransform createRow = Row(left);
+        NeonButton(createRow, "Create game", new Vector2(0, 44), NeonTheme.Lime, NeonTheme.Pink, 0f, 17, CreateOnlineGame);
+        RectTransform joinRow = Row(left);
+        codeInput = InputField(joinRow, "CODE", "", 6);
+        codeInput.characterValidation = TMP_InputField.CharacterValidation.Alphanumeric;
+        codeInput.onValidateInput += (text, index, ch) => char.ToUpperInvariant(ch);
+        NeonButton(joinRow, "Join", new Vector2(0, 44), NeonTheme.Yellow, NeonTheme.Cyan, 0f, 17, JoinOnlineGame);
+
+        SectionLabel(right, "Play anyone", NeonTheme.PinkSoft);
+        TextMeshProUGUI blurb = NewText("Blurb", right, "Get paired with the next player looking for a 4x4x4 game.", 15, NeonTheme.Lavender, TextAlignmentOptions.TopLeft);
+        blurb.fontStyle = FontStyles.Normal;
+        blurb.enableWordWrapping = true;
+        blurb.gameObject.AddComponent<LayoutElement>().preferredHeight = 44;
+        RectTransform matchRow = Row(right);
+        NeonButton(matchRow, "Find match!", new Vector2(0, 50), NeonTheme.Pink, NeonTheme.Cyan, -1f, 19, FindOnlineMatch);
+
+        onlineStatus = NewText("Status", root, "", 17, NeonTheme.Yellow, TextAlignmentOptions.Center);
+        onlineStatus.enableWordWrapping = true;
+        onlineStatus.rectTransform.anchorMin = new Vector2(0, 0);
+        onlineStatus.rectTransform.anchorMax = new Vector2(1, 0);
+        onlineStatus.rectTransform.pivot = new Vector2(0.5f, 0);
+        onlineStatus.rectTransform.sizeDelta = new Vector2(-40, 48);
+        onlineStatus.rectTransform.anchoredPosition = new Vector2(0, 6);
+    }
+
+    private RectTransform Row(RectTransform parent)
+    {
+        RectTransform row = NewRect("Row", parent);
+        var size = row.gameObject.AddComponent<LayoutElement>();
+        size.preferredHeight = 50;
+        size.flexibleHeight = 0;
+        var layout = row.gameObject.AddComponent<HorizontalLayoutGroup>();
+        layout.spacing = 10;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = true;
+        return row;
+    }
+
+    private TMP_InputField InputField(RectTransform parent, string placeholder, string value, int limit)
+    {
+        Image box = NewImage("Input", parent, NeonTheme.Cyan);
+        box.sprite = NeonTheme.RoundedOutline;
+        box.type = Image.Type.Sliced;
+        var size = box.gameObject.AddComponent<LayoutElement>();
+        size.preferredHeight = 44;
+        size.flexibleHeight = 0;
+
+        RectTransform area = NewRect("Text Area", box.transform);
+        Stretch(area);
+        area.offsetMin = new Vector2(14, 4);
+        area.offsetMax = new Vector2(-14, -4);
+        area.gameObject.AddComponent<RectMask2D>();
+
+        TextMeshProUGUI hint = NewText("Placeholder", area, placeholder, 18, NeonTheme.Muted, TextAlignmentOptions.Left);
+        Stretch(hint.rectTransform);
+        TextMeshProUGUI text = NewText("Text", area, "", 18, NeonTheme.White, TextAlignmentOptions.Left);
+        Stretch(text.rectTransform);
+
+        var input = box.gameObject.AddComponent<TMP_InputField>();
+        input.textViewport = area;
+        input.textComponent = text;
+        input.placeholder = hint;
+        input.characterLimit = limit;
+        input.fontAsset = text.font;
+        input.pointSize = 18;
+        input.caretColor = NeonTheme.Lime;
+        input.text = value;
+        return input;
+    }
+
+    private void ShowOnline()
+    {
+        menuScreen.SetActive(false);
+        setupScreen.SetActive(false);
+        customizeScreen.SetActive(false);
+        onlineScreen.SetActive(true);
+        onlineStatus.text = "";
+        OnlineClient.GetOrCreate();
+    }
+
+    private void LeaveOnlineScreen()
+    {
+        if (OnlineClient.Instance != null) OnlineClient.Instance.LeaveOnline();
+        onlineBusy = false;
+        ShowMenu();
+    }
+
+    private void SetOnlineStatus(string text) => onlineStatus.text = text;
+
+    private string ChosenName()
+    {
+        string name = nameInput.text.Trim();
+        return string.IsNullOrEmpty(name) ? "Player" : name;
+    }
+
+    private void CreateOnlineGame() => StartCoroutine(CreateRoutine());
+    private void JoinOnlineGame() => StartCoroutine(JoinRoutine(codeInput.text));
+    private void FindOnlineMatch() => StartCoroutine(MatchRoutine());
+
+    private IEnumerator SignIn(Action<bool> done)
+    {
+        var client = OnlineClient.GetOrCreate();
+        bool ok = false;
+        yield return client.EnsureSignedIn(ChosenName(), (success, error) =>
+        {
+            ok = success;
+            if (!success) SetOnlineStatus(error);
+        });
+        done(ok);
+    }
+
+    private IEnumerator CreateRoutine()
+    {
+        if (onlineBusy) yield break;
+        onlineBusy = true;
+        SetOnlineStatus("Connecting…");
+        bool signedIn = false;
+        yield return SignIn(ok => signedIn = ok);
+        if (!signedIn) { onlineBusy = false; yield break; }
+
+        string code = null;
+        yield return OnlineClient.Instance.CreateRoom("4x4x4", (c, error) =>
+        {
+            code = c;
+            if (c == null) SetOnlineStatus(error);
+        });
+        if (code == null) { onlineBusy = false; yield break; }
+
+        ListenForStart();
+        OnlineClient.Instance.JoinRoom(code);
+        SetOnlineStatus($"Your game code is {code}. Send it to a friend; the game starts when they join.");
+    }
+
+    private IEnumerator JoinRoutine(string code)
+    {
+        code = (code ?? "").Trim().ToUpperInvariant();
+        if (code.Length != 6) { SetOnlineStatus("Game codes are 6 letters and numbers"); yield break; }
+        if (onlineBusy) yield break;
+        onlineBusy = true;
+        SetOnlineStatus("Joining…");
+        bool signedIn = false;
+        yield return SignIn(ok => signedIn = ok);
+        if (!signedIn) { onlineBusy = false; yield break; }
+        ListenForStart();
+        OnlineClient.Instance.JoinRoom(code);
+        // If the room is full or missing, the socket closes and OnClosed reports it
+    }
+
+    private IEnumerator MatchRoutine()
+    {
+        if (onlineBusy) yield break;
+        onlineBusy = true;
+        SetOnlineStatus("Connecting…");
+        bool signedIn = false;
+        yield return SignIn(ok => signedIn = ok);
+        if (!signedIn) { onlineBusy = false; yield break; }
+        ListenForStart();
+        SetOnlineStatus("Looking for an opponent…");
+        OnlineClient.Instance.FindMatch("4x4x4",
+            code => { SetOnlineStatus("Opponent found!"); OnlineClient.Instance.JoinRoom(code); },
+            error => { SetOnlineStatus(error); onlineBusy = false; });
+    }
+
+    private void ListenForStart()
+    {
+        var client = OnlineClient.Instance;
+        client.OnMessage -= OnOnlineMessage;
+        client.OnMessage += OnOnlineMessage;
+        client.OnClosed -= OnOnlineClosed;
+        client.OnClosed += OnOnlineClosed;
+    }
+
+    private void OnOnlineClosed(string reason)
+    {
+        if (onlineStarting || !onlineScreen.activeInHierarchy) return;
+        SetOnlineStatus("Couldn't join that game. Check the code, or it may already be full.");
+        onlineBusy = false;
+    }
+
+    private void OnOnlineMessage(ServerMessage msg)
+    {
+        if (onlineStarting) return;
+        // Both seats filled: the room moves to piece placement and the game begins
+        if ((msg.type == "room:joined" || msg.type == "room:playerJoined") && msg.state != null && msg.state.phase == "placement")
+        {
+            StartOnlineGame(msg.state);
+        }
+        else if (msg.type == "room:joined")
+        {
+            SetOnlineStatus($"Your game code is {msg.roomCode}. Waiting for your opponent to join…");
+        }
+    }
+
+    private void StartOnlineGame(NetState state)
+    {
+        onlineStarting = true;
+        var client = OnlineClient.Instance;
+        client.OnMessage -= OnOnlineMessage;
+        client.OnClosed -= OnOnlineClosed;
+
+        OnlineSession.Begin(client.LocalColor);
+        OnlineGameBridge.Begin();
+
+        BoardSize size = state.config != null && state.config.boardSize == "8x8x8" ? BoardSize.Large8x8x8
+                       : state.config != null && state.config.boardSize == "6x6x6" ? BoardSize.Medium6x6x6
+                       : BoardSize.Small4x4x4;
+        var config = new GameConfiguration(2, 0, size, AIDifficulty.Medium);
+        config.playerTypes = new List<PlayerType> { PlayerType.Human, PlayerType.Human };
+        config.enableChaosMode = false;
+        config.enableTimedPlay = false;
+        config.isOnlineGame = true;
+        config.roomCode = client.RoomCode;
+        config.ApplyToLegacyFields();
+        SceneController.Instance.LoadGameScene(config);
+    }
+
     // ───────────────────────── Navigation ─────────────────────────
 
     private void ShowMenu()
@@ -616,12 +875,14 @@ public class NeonMenu : MonoBehaviour
         menuScreen.SetActive(true);
         setupScreen.SetActive(false);
         customizeScreen.SetActive(false);
+        onlineScreen.SetActive(false);
     }
 
     private void ShowCustomize()
     {
         menuScreen.SetActive(false);
         setupScreen.SetActive(false);
+        onlineScreen.SetActive(false);
         customizeScreen.SetActive(true);
         Refresh();
     }
@@ -630,6 +891,7 @@ public class NeonMenu : MonoBehaviour
     {
         menuScreen.SetActive(false);
         customizeScreen.SetActive(false);
+        onlineScreen.SetActive(false);
         setupScreen.SetActive(true);
         Refresh();
     }

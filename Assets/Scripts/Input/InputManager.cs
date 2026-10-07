@@ -171,6 +171,13 @@ public class InputManager : MonoBehaviour
     
     private void ProcessTouch(Vector2 screenPosition)
     {
+        // Online: during play, input only works on your own turn
+        if (OnlineSession.IsActive && GameStateManager.Instance != null && GameStateManager.Instance.CanMovePieces()
+            && TurnManager.Instance != null && TurnManager.Instance.GetCurrentPlayer() != OnlineSession.LocalColor)
+        {
+            return;
+        }
+
         // A tap on an on-screen button must not also select or place on the board behind it
         if (TouchGUI.IsOverUI(screenPosition))
         {

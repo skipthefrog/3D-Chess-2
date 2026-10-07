@@ -25,7 +25,7 @@ Client → server (add `requestId` to get an `{ type: 'ack', requestId, ok, erro
 
 Server → client: `room:joined {roomCode, yourColor, isHost, state}`,
 `room:playerJoined`, `room:playerLeft {graceMs}`, `room:playerReconnected`,
-`game:phaseChanged`, `game:moveValidated`, `game:moveRejected`,
+`game:piecePlaced`, `game:playerReady`, `game:phaseChanged`, `game:moveValidated`, `game:moveRejected`,
 `game:pawnPromotion`, `game:chaosRotation`, `game:playerEliminated`,
 `game:drawOffered`, `game:over {winner, reason}`, `game:stateUpdate {reason, state}`.
 

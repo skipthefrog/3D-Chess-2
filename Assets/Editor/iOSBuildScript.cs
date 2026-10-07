@@ -85,6 +85,9 @@ public class iOSBuildScript
         PlayerSettings.iOS.targetOSVersionString = "15.0";
         PlayerSettings.iOS.targetDevice = iOSTargetDevice.iPhoneAndiPad;
 
+        // Plain http (the local test server) only in development builds; release builds use https
+        PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
+
         // Landscape only until the UI is checked in portrait
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
         PlayerSettings.allowedAutorotateToPortrait = false;

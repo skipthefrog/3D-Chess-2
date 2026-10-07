@@ -279,7 +279,7 @@ describe('GameEngine', () => {
 
   test('rejects move with no piece at source', () => {
     const engine = setupBasicGame();
-    const result = engine.executeMove('White', { x: 1, y: 1, z: 1 }, { x: 2, y: 1, z: 1 });
+    const result = engine.executeMove('White', { x: 1, y: 3, z: 3 }, { x: 2, y: 3, z: 3 }); // an empty cell
     expect(result.success).toBe(false);
     expect(result.error).toContain('No piece');
   });

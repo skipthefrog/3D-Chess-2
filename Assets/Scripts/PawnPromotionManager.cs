@@ -125,6 +125,18 @@ public class PawnPromotionManager : MonoBehaviour
             Debug.LogWarning($"PawnPromotionManager.StartPromotion: TurnManager.Instance is null - assuming human player");
         }
         
+        // Online: the other player picks on their device; we apply it when the server says
+        if (OnlineSession.IsActive && promotingPlayerColor != OnlineSession.LocalColor)
+        {
+            if (pendingRemotePromotion.HasValue)
+            {
+                var type = pendingRemotePromotion.Value;
+                pendingRemotePromotion = null;
+                OnPieceSelected(type);
+            }
+            return;
+        }
+
         if (isAIPlayer)
         {
             Debug.Log($"PawnPromotionManager.StartPromotion: AI player detected - using automatic promotion");
@@ -362,8 +374,22 @@ public class PawnPromotionManager : MonoBehaviour
     /// <summary>
     /// Handle the player's piece selection
     /// </summary>
+    private ChessPieceType? pendingRemotePromotion;
+
+    /// <summary>Online: apply the other player's promotion choice</summary>
+    public void ApplyRemotePromotion(ChessPieceType type)
+    {
+        if (isPromotionInProgress && promotingPawn != null && promotingPlayerColor != OnlineSession.LocalColor)
+            OnPieceSelected(type);
+        else
+            pendingRemotePromotion = type;
+    }
+
     private void OnPieceSelected(ChessPieceType selectedPieceType)
     {
+        if (OnlineSession.ShouldSend(promotingPlayerColor))
+            OnlineClient.Instance.SendPromotion(promotionTargetPosition, selectedPieceType);
+
         Debug.Log($"PawnPromotionManager.OnPieceSelected: Player selected {selectedPieceType} for promotion");
         Debug.Log($"PawnPromotionManager.OnPieceSelected: isPromotionInProgress={isPromotionInProgress}");
         

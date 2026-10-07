@@ -655,6 +655,7 @@ public class GameEndDetectionManager : MonoBehaviour
     /// <param name="forfeitingPlayer">The player who wants to forfeit</param>
     public void HandleForfeit(PieceColor forfeitingPlayer)
     {
+        if (OnlineSession.ShouldSend(forfeitingPlayer)) OnlineClient.Instance.SendResign();
         if (!enableGameEndDetection)
         {
             Debug.LogWarning("GameEndDetectionManager: Forfeit ignored - game end detection disabled");

@@ -1441,6 +1441,7 @@ public class TurnManager : MonoBehaviour
     /// </summary>
     public void RequestDrawOffer()
     {
+        if (OnlineSession.IsActive) return; // not supported in online games yet
         if (GameStateManager.Instance == null || !GameStateManager.Instance.CanMovePieces())
         {
             Debug.LogWarning("TurnManager: Cannot offer draw - not in playing state");
