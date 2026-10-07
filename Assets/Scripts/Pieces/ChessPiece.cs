@@ -67,7 +67,9 @@ public abstract class ChessPiece : MonoBehaviour
     
     protected virtual void Awake()
     {
-        meshRenderer = GetComponent<MeshRenderer>();
+        // Swap the placeholder shapes for the modeled piece, if there is one
+        bool modeled = PieceModels.Swap(this);
+        meshRenderer = modeled ? PieceModels.Body(this) : GetComponent<MeshRenderer>();
         if (meshRenderer == null)
         {
             meshRenderer = GetComponentInChildren<MeshRenderer>();
@@ -153,17 +155,20 @@ public abstract class ChessPiece : MonoBehaviour
             if (pieceColor == PieceColor.White) targetMaterial = whiteMaterial;
             else if (pieceColor == PieceColor.Black) targetMaterial = blackMaterial;
         }
+        bool modeled = transform.Find(PieceModels.ModelName) != null;
         if (targetMaterial == null)
         {
-            targetMaterial = PieceSets.CreateMaterial(pieceColor);
+            targetMaterial = modeled ? PieceSets.CreateBodyMaterial(pieceColor) : PieceSets.CreateMaterial(pieceColor);
         }
+        Material stripMaterial = modeled ? PieceSets.CreateStripMaterial(pieceColor) : null;
+        PieceModels.Face(this);
 
         // Every part of the piece (knights and rooks are made of two blocks), but not
-        // the selection or check indicators added later
+        // the selection or check indicators added later. Model light strips glow in the team color.
         foreach (MeshRenderer part in GetComponentsInChildren<MeshRenderer>(true))
         {
             if (part.name.Contains("Glow") || part.name.Contains("Indicator")) continue;
-            part.sharedMaterial = targetMaterial;
+            part.sharedMaterial = part.name == PieceModels.StripName ? stripMaterial : targetMaterial;
         }
         meshRenderer.material = targetMaterial;
     }

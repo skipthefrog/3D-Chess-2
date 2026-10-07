@@ -130,6 +130,37 @@ public static class PieceSets
         return material;
     }
 
+    /// <summary>
+    /// Material for a modeled piece's body. The model's light strips carry the glow, so in
+    /// the Neon Glow set the body is dark tinted metal instead of glowing all over.
+    /// </summary>
+    public static Material CreateBodyMaterial(PieceColor player)
+    {
+        if (Current != Kind.NeonGlow) return CreateMaterial(player);
+        Color tint = Tint(Kind.NeonGlow, player);
+        Material material = FromTemplate("PieceSets/Glow");
+        bool light = player == PieceColor.White;
+        material.color = light ? new Color(0.82f, 0.84f, 0.92f) : Color.Lerp(tint, new Color(0.1f, 0.05f, 0.2f), 0.6f);
+        material.EnableKeyword("_EMISSION");
+        material.SetColor("_EmissionColor", tint * 0.12f);
+        material.SetFloat("_Metallic", 0.6f);
+        material.SetFloat("_Glossiness", 0.75f);
+        return material;
+    }
+
+    /// <summary>The glowing light strips on modeled pieces, in the team's neon color</summary>
+    public static Material CreateStripMaterial(PieceColor player)
+    {
+        Color tint = player == PieceColor.White ? NeonTheme.Cyan : Tint(Kind.NeonGlow, player);
+        Material material = FromTemplate("PieceSets/Glow");
+        material.color = tint;
+        material.EnableKeyword("_EMISSION");
+        material.SetColor("_EmissionColor", tint * 2.2f);
+        material.SetFloat("_Metallic", 0f);
+        material.SetFloat("_Glossiness", 0.5f);
+        return material;
+    }
+
     private static Material FromTemplate(string path)
     {
         Material template = Resources.Load<Material>(path);
