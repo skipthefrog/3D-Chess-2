@@ -2,14 +2,13 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
-using NativeWebSocket;
 using UnityEngine;
 using UnityEngine.Networking;
 
 /// <summary>
 /// Connection to the Cloudflare game server (server-cf): guest sign-in, creating and
 /// joining rooms, Find Match, and the room's WebSocket. Lives across scene loads.
-/// Works on iPhone and WebGL (NativeWebSocket uses the browser's WebSocket on web).
+/// Works on iPhone and WebGL (see GameSocket for how each platform connects).
 /// </summary>
 public class OnlineClient : MonoBehaviour
 {
@@ -34,7 +33,7 @@ public class OnlineClient : MonoBehaviour
     }
 
     // Session state
-    public bool IsConnected => socket != null && socket.State == WebSocketState.Open;
+    public bool IsConnected => socket != null && socket.IsOpen;
     public string RoomCode { get; private set; }
     public PieceColor LocalColor { get; private set; }
     public bool IsHost { get; private set; }
@@ -44,8 +43,8 @@ public class OnlineClient : MonoBehaviour
     public event Action<ServerMessage> OnMessage;
     public event Action<string> OnClosed;
 
-    private WebSocket socket;
-    private WebSocket matchSocket;
+    private GameSocket socket;
+    private GameSocket matchSocket;
     private int nextRequestId = 1;
     private readonly Dictionary<int, Action<ServerMessage>> pending = new Dictionary<int, Action<ServerMessage>>();
     private bool intentionalClose;
@@ -66,10 +65,8 @@ public class OnlineClient : MonoBehaviour
 
     private void Update()
     {
-#if !UNITY_WEBGL || UNITY_EDITOR
-        socket?.DispatchMessageQueue();
-        matchSocket?.DispatchMessageQueue();
-#endif
+        socket?.Dispatch();
+        matchSocket?.Dispatch();
     }
 
     private async void OnApplicationQuit()
@@ -85,7 +82,9 @@ public class OnlineClient : MonoBehaviour
     public IEnumerator EnsureSignedIn(string name, Action<bool, string> done)
     {
         string token = PlayerPrefs.GetString("OnlineToken", "");
-        if (!string.IsNullOrEmpty(token) && PlayerName == name)
+        // A token only works on the server that issued it (local test server vs live)
+        bool sameServer = PlayerPrefs.GetString("OnlineTokenServer", "") == ServerUrl;
+        if (!string.IsNullOrEmpty(token) && PlayerName == name && sameServer)
         {
             done(true, null);
             yield break;
@@ -103,6 +102,7 @@ public class OnlineClient : MonoBehaviour
             var auth = JsonUtility.FromJson<AuthResponse>(request.downloadHandler.text);
             PlayerPrefs.SetString("OnlineToken", auth.token);
             PlayerPrefs.SetString("OnlineName", auth.name);
+            PlayerPrefs.SetString("OnlineTokenServer", ServerUrl);
             PlayerPrefs.Save();
             done(true, null);
         }
@@ -137,12 +137,12 @@ public class OnlineClient : MonoBehaviour
         string url = ServerUrl.Replace("https://", "wss://").Replace("http://", "ws://") +
                      $"/rooms/{RoomCode}/connect?token={UnityWebRequest.EscapeURL(Token)}";
 
-        socket = new WebSocket(url);
-        socket.OnMessage += bytes => Handle(Encoding.UTF8.GetString(bytes));
-        socket.OnError += error => Debug.LogWarning($"OnlineClient: socket error {error}");
-        socket.OnClose += code2 =>
+        var opened = socket = new GameSocket(url);
+        opened.OnMessage += Handle;
+        opened.OnError += error => Debug.LogWarning($"OnlineClient: socket error {error}");
+        opened.OnClose += reason =>
         {
-            if (!intentionalClose) OnClosed?.Invoke(code2 == WebSocketCloseCode.Normal ? "Connection closed" : "Connection lost");
+            if (!intentionalClose && socket == opened) OnClosed?.Invoke("Connection lost");
         };
         await socket.Connect();
     }
@@ -172,15 +172,19 @@ public class OnlineClient : MonoBehaviour
         await CloseMatchmaking();
         string url = ServerUrl.Replace("https://", "wss://").Replace("http://", "ws://") +
                      $"/matchmaking/connect?token={UnityWebRequest.EscapeURL(Token)}";
-        matchSocket = new WebSocket(url);
-        matchSocket.OnOpen += () =>
-            matchSocket.SendText("{\"type\":\"matchmaking:join\",\"config\":{\"boardSize\":\"" + boardSize + "\",\"playerCount\":2}}");
-        matchSocket.OnMessage += bytes =>
+        var queue = matchSocket = new GameSocket(url);
+        queue.OnOpen += () =>
+            queue.SendText("{\"type\":\"matchmaking:join\",\"config\":{\"boardSize\":\"" + boardSize + "\",\"playerCount\":2}}");
+        queue.OnMessage += text =>
         {
-            var msg = JsonUtility.FromJson<ServerMessage>(Encoding.UTF8.GetString(bytes));
+            var msg = JsonUtility.FromJson<ServerMessage>(text);
             if (msg.type == "matchmaking:found") onFound(msg.roomCode);
         };
-        matchSocket.OnError += error => onError("Couldn't reach the game server");
+        queue.OnError += error =>
+        {
+            Debug.LogError($"OnlineClient: matchmaking socket error: {error}");
+            onError(Debug.isDebugBuild ? $"Couldn't reach the game server ({error})" : "Couldn't reach the game server");
+        };
         await matchSocket.Connect();
     }
 
