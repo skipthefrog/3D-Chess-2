@@ -660,6 +660,21 @@ public abstract class ChessPiece : MonoBehaviour
         return shader;
     }
 
+    /// <summary>
+    /// A see-through glassy bubble for highlighting pieces. Uses the Crystal piece set's
+    /// template (Standard shader in Fade mode), whose shader variant is always in the build.
+    /// </summary>
+    protected static Material BubbleMaterial(Color color, float alpha, int renderQueue)
+    {
+        Material template = Resources.Load<Material>("PieceSets/Crystal");
+        Material bubble = template != null ? new Material(template) : new Material(Shader.Find("Legacy Shaders/Transparent/Diffuse"));
+        bubble.color = new Color(color.r, color.g, color.b, alpha);
+        bubble.SetFloat("_Metallic", 0f);
+        bubble.SetFloat("_Glossiness", 0.85f);
+        bubble.renderQueue = renderQueue;
+        return bubble;
+    }
+
     protected virtual void AddSelectionGlow()
     {
         if (selectionGlow != null) return; // Already has glow
@@ -713,23 +728,7 @@ public abstract class ChessPiece : MonoBehaviour
         }
 
         // Create glowing material with shader fallback
-        Renderer glowRenderer = selectionGlow.GetComponent<Renderer>();
-        Shader shader = FindShaderWithFallback();
-        Material glowMaterial = new Material(shader);
-        glowMaterial.color = new Color(1f, 1f, 0f, 0.2f); // More transparent yellow
-
-        // Only set these properties if using URP or Standard shader
-        if (shader.name.Contains("Lit") || shader.name.Contains("Standard"))
-        {
-            glowMaterial.SetFloat("_Surface", 1); // Transparent
-            glowMaterial.SetFloat("_Blend", 0); // Alpha blend
-            glowMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            glowMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            glowMaterial.SetInt("_ZWrite", 0);
-            glowMaterial.renderQueue = 3000;
-        }
-
-        glowRenderer.material = glowMaterial;
+        selectionGlow.GetComponent<Renderer>().material = BubbleMaterial(NeonTheme.Yellow, 0.16f, 3000);
 
     }
     
@@ -772,28 +771,7 @@ public abstract class ChessPiece : MonoBehaviour
         }
 
         // Create glowing blue material with emission and shader fallback
-        Renderer glowRenderer = capturableGlow.GetComponent<Renderer>();
-        Shader shader = FindShaderWithFallback();
-        Material glowMaterial = new Material(shader);
-        glowMaterial.color = new Color(0.3f, 0.6f, 1.0f, 0.3f); // Semi-transparent bright blue
-
-        // Only set these properties if using URP or Standard shader
-        if (shader.name.Contains("Lit") || shader.name.Contains("Standard"))
-        {
-            // Add emission for glow effect
-            glowMaterial.EnableKeyword("_EMISSION");
-            glowMaterial.SetColor("_EmissionColor", new Color(0.0f, 0.4f, 1.0f, 1.0f)); // Bright blue emission
-
-            // Set transparency properties
-            glowMaterial.SetFloat("_Surface", 1); // Transparent
-            glowMaterial.SetFloat("_Blend", 0); // Alpha blend
-            glowMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            glowMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            glowMaterial.SetInt("_ZWrite", 0);
-            glowMaterial.renderQueue = 3000;
-        }
-
-        glowRenderer.material = glowMaterial;
+        capturableGlow.GetComponent<Renderer>().material = BubbleMaterial(NeonTheme.Cyan, 0.2f, 3000);
 
         Debug.Log($"🔵 AddCapturableGlow: Created blue glow for {pieceColor} {pieceType} at {CurrentPosition}");
     }
@@ -837,21 +815,7 @@ public abstract class ChessPiece : MonoBehaviour
         Renderer checkRenderer = checkIndicator.GetComponent<Renderer>();
 
         // Use shaders that are BUILT for transparency, not opaque shaders with properties
-        Shader shader = Shader.Find("Transparent/Diffuse");
-        if (shader == null)
-        {
-            shader = Shader.Find("Legacy Shaders/Transparent/Diffuse");
-            Debug.LogWarning("ChessPiece: Transparent/Diffuse not found, using Legacy version");
-        }
-        if (shader == null)
-        {
-            shader = Shader.Find("Sprites/Default");
-            Debug.LogWarning("ChessPiece: Legacy transparent shader not found, using Sprites/Default");
-        }
-
-        Material checkMaterial = new Material(shader);
-        checkMaterial.color = new Color(1f, 0f, 0f, 0.6f); // Semi-transparent red for visibility (60% opacity)
-        checkMaterial.renderQueue = 3001; // Render after selection glow
+        Material checkMaterial = BubbleMaterial(new Color(1f, 0.15f, 0.25f), 0.3f, 3001);
 
         checkRenderer.material = checkMaterial;
 

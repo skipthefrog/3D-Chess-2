@@ -893,7 +893,20 @@ public class InputManager : MonoBehaviour
             glowMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
             glowMaterial.SetInt("_ZWrite", 0);
             glowMaterial.renderQueue = 3000; // Render after opaque objects
-            
+
+            // A capture marker sits on the enemy piece, so make it see-through glass
+            if (isCapture && !(GameStateManager.Instance != null && GameStateManager.Instance.CanPlacePieces()))
+            {
+                Material template = Resources.Load<Material>("PieceSets/Crystal");
+                if (template != null)
+                {
+                    glowMaterial = new Material(template);
+                    glowMaterial.color = new Color(NeonTheme.Cyan.r, NeonTheme.Cyan.g, NeonTheme.Cyan.b, 0.22f);
+                    glowMaterial.SetFloat("_Glossiness", 0.85f);
+                    glowMaterial.renderQueue = 3000;
+                }
+            }
+
             renderer.material = glowMaterial;
             
             moveIndicators.Add(indicator);
