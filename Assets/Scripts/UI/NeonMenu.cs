@@ -620,6 +620,8 @@ public class NeonMenu : MonoBehaviour
     private TextMeshProUGUI onlineStatus;
     private bool onlineBusy;
     private bool onlineStarting;
+    private GameObject matchButtonRow, searchingPanel;
+    private TextMeshProUGUI searchingLabel;
 
     private void BuildOnlineScreen()
     {
@@ -665,6 +667,8 @@ public class NeonMenu : MonoBehaviour
         blurb.gameObject.AddComponent<LayoutElement>().preferredHeight = 44;
         RectTransform matchRow = Row(right);
         NeonButton(matchRow, "Find match!", new Vector2(0, 50), NeonTheme.Pink, NeonTheme.Cyan, -1f, 19, FindOnlineMatch);
+        matchButtonRow = matchRow.gameObject;
+        BuildSearchingPanel(right);
 
         onlineStatus = NewText("Status", root, "", 17, NeonTheme.Yellow, TextAlignmentOptions.Center);
         onlineStatus.enableWordWrapping = true;
@@ -673,6 +677,53 @@ public class NeonMenu : MonoBehaviour
         onlineStatus.rectTransform.pivot = new Vector2(0.5f, 0);
         onlineStatus.rectTransform.sizeDelta = new Vector2(-40, 48);
         onlineStatus.rectTransform.anchoredPosition = new Vector2(0, 6);
+    }
+
+    // Shown in place of the Find match button while looking for an opponent
+    private void BuildSearchingPanel(RectTransform parent)
+    {
+        RectTransform panel = NewRect("Searching", parent);
+        var size = panel.gameObject.AddComponent<LayoutElement>();
+        size.preferredHeight = 96;
+        size.flexibleHeight = 0;
+
+        NeonSpinner spinner = NeonSpinner.Create(panel, 84);
+        Place((RectTransform)spinner.transform, new Vector2(0, 0.5f), new Vector2(84, 84), new Vector2(46, 0));
+
+        searchingLabel = NewText("Label", panel, "", 17, NeonTheme.Yellow, TextAlignmentOptions.Left);
+        searchingLabel.rectTransform.anchorMin = new Vector2(0, 0.5f);
+        searchingLabel.rectTransform.anchorMax = new Vector2(1, 1);
+        searchingLabel.rectTransform.offsetMin = new Vector2(100, 0);
+        searchingLabel.rectTransform.offsetMax = new Vector2(0, -4);
+
+        Button cancel = NeonButton(panel, "Cancel", new Vector2(120, 38), NeonTheme.Cyan, NeonTheme.Pink, 0f, 15, CancelFindMatch);
+        RectTransform cancelRect = (RectTransform)cancel.transform;
+        cancelRect.anchorMin = cancelRect.anchorMax = new Vector2(0, 0);
+        cancelRect.pivot = new Vector2(0, 0);
+        cancelRect.sizeDelta = new Vector2(120, 38);
+        cancelRect.anchoredPosition = new Vector2(100, 6);
+
+        searchingPanel = panel.gameObject;
+        searchingPanel.SetActive(false);
+    }
+
+    private void SetSearching(string label)
+    {
+        bool searching = label != null;
+        searchingPanel.SetActive(searching);
+        matchButtonRow.SetActive(!searching);
+        if (searching)
+        {
+            searchingLabel.text = label;
+            SetOnlineStatus("");
+        }
+    }
+
+    private void CancelFindMatch()
+    {
+        if (OnlineClient.Instance != null) OnlineClient.Instance.LeaveOnline();
+        onlineBusy = false;
+        SetSearching(null);
     }
 
     private RectTransform Row(RectTransform parent)
@@ -729,6 +780,7 @@ public class NeonMenu : MonoBehaviour
         customizeScreen.SetActive(false);
         onlineScreen.SetActive(true);
         onlineStatus.text = "";
+        SetSearching(null);
         OnlineClient.GetOrCreate();
     }
 
@@ -804,15 +856,16 @@ public class NeonMenu : MonoBehaviour
     {
         if (onlineBusy) yield break;
         onlineBusy = true;
-        SetOnlineStatus("Connecting…");
+        SetSearching("Connecting…");
         bool signedIn = false;
         yield return SignIn(ok => signedIn = ok);
-        if (!signedIn) { onlineBusy = false; yield break; }
+        if (!signedIn) { SetSearching(null); onlineBusy = false; yield break; }
+        if (!onlineBusy) yield break;  // cancelled while signing in
         ListenForStart();
-        SetOnlineStatus("Looking for an opponent…");
+        SetSearching("Finding you an opponent…");
         OnlineClient.Instance.FindMatch("4x4x4",
-            code => { SetOnlineStatus("Opponent found!"); OnlineClient.Instance.JoinRoom(code); },
-            error => { SetOnlineStatus(error); onlineBusy = false; });
+            code => { SetSearching("Opponent found!"); OnlineClient.Instance.JoinRoom(code); },
+            error => { SetSearching(null); SetOnlineStatus(error); onlineBusy = false; });
     }
 
     private void ListenForStart()
