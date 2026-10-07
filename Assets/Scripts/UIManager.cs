@@ -464,6 +464,9 @@ public class UIManager : MonoBehaviour
             CreateDrawOfferIndicator(buttonObj);
         }
         
+        // The neon Menu button is drawn by LayerViewUI with the other in-game controls
+        uiCanvas.enabled = false;
+
         Debug.Log("UIManager: Menu button created successfully with high priority canvas");
     }
     

@@ -142,45 +142,19 @@ public class InputManager : MonoBehaviour
             HandleGameActionShortcuts();
         }
         
-        // Check for input
-        bool touchInput = InputHelper.TouchCount > 0;
-        bool mouseInput = InputHelper.GetMouseButtonDown(0);
-        
-        // Handle touch input for iOS using InputHelper
-        if (touchInput)
+        // Process each tap or click exactly once. On iOS a touch also raises
+        // simulated mouse events, so handling both would run the same tap 2-3 times.
+        if (InputHelper.TouchCount > 0)
         {
             Touch touch = InputHelper.GetTouch(0);
-            Debug.Log($"HandleInput: Touch detected - phase={touch.phase}, position={touch.position}");
             if (touch.phase == TouchPhase.Began)
             {
-                Debug.Log("HandleInput: Processing touch input");
                 ProcessTouch(touch.position);
             }
         }
-        
-        // Handle mouse input for testing in editor using InputHelper
-        if (mouseInput)
+        else if (InputHelper.GetMouseButtonDown(0))
         {
-            Vector3 mousePos = InputHelper.MousePosition;
-            Debug.Log($"HandleInput: Mouse click detected at {mousePos}");
-            ProcessTouch(mousePos);
-        }
-        
-        // FALLBACK: Direct Input system for testing (bypass InputHelper)
-        try 
-        {
-            if (Input.GetMouseButtonDown(0))
-            {
-                Debug.Log("HandleInput: FALLBACK - Direct Input.GetMouseButtonDown detected");
-                ProcessTouch(Input.mousePosition);
-            }
-        }
-        catch (System.InvalidOperationException e)
-        {
-            if (Time.frameCount % 300 == 0) // Log every 5 seconds
-            {
-                Debug.LogWarning($"HandleInput: Direct input still failing - {e.Message}");
-            }
+            ProcessTouch(InputHelper.MousePosition);
         }
         
         // Keyboard testing
@@ -197,6 +171,12 @@ public class InputManager : MonoBehaviour
     
     private void ProcessTouch(Vector2 screenPosition)
     {
+        // A tap on an on-screen button must not also select or place on the board behind it
+        if (TouchGUI.IsOverUI(screenPosition))
+        {
+            return;
+        }
+
         // Check if game state allows any interaction
         if (GameStateManager.Instance == null)
         {
@@ -794,14 +774,14 @@ public class InputManager : MonoBehaviour
                 indicator.transform.localPosition = localPos + Vector3.up * 0.5f; // Slightly above floor
                 Debug.Log($"ShowValidMoveIndicators: Created indicator for {move} at local position {localPos}");
             
-            // Make it smaller and glowing
-            indicator.transform.localScale = new Vector3(0.4f, 0.4f, 0.4f);
+            // Same size as placement indicators so they are easy to see and tap
+            indicator.transform.localScale = new Vector3(0.8f, 0.8f, 0.8f);
             
             // Keep collider but make it larger for mobile-friendly clicking
             SphereCollider indicatorCollider = indicator.GetComponent<SphereCollider>();
             if (indicatorCollider != null)
             {
-                indicatorCollider.radius = 1.2f; // Larger than visual for easier touch targeting
+                indicatorCollider.radius = 1.0f; // Larger than visual for easier touch targeting
                 Debug.Log($"ShowValidMoveIndicators: Set collider radius to {indicatorCollider.radius} for move {move}");
             }
             

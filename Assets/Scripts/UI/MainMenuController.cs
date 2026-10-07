@@ -327,6 +327,16 @@ public class MainMenuController : MonoBehaviour
     }
     
     /// <summary>
+    /// Skip the setup screens: 2 players on a 4x4x4 board, you (White) against a Medium computer
+    /// </summary>
+    public void StartQuickPlay()
+    {
+        currentConfig = new GameConfiguration(2, 1, BoardSize.Small4x4x4, AIDifficulty.Medium);
+        currentConfig.playerTypes = new System.Collections.Generic.List<PlayerType> { PlayerType.Human, PlayerType.Computer };
+        StartGame();
+    }
+
+    /// <summary>
     /// Quit the game application
     /// </summary>
     public void QuitGame()
@@ -763,9 +773,17 @@ public class MainMenuController : MonoBehaviour
         // Subtitle for clarity
         CreateUIText("Subtitle", "Welcome to 3D Chess", mainMenuPanel, new Vector2(0, 0.6f), new Vector2(1, 0.75f), 18);
 
-        // New Local Game Button - upper button
+        // Quick Play - one tap into a 2-player 4x4x4 game against the computer
+        CreateUIButton("QuickPlayButton", "Quick Play vs Computer", mainMenuPanel,
+                       new Vector2(0.1f, 0.45f), new Vector2(0.9f, 0.59f),
+                       () => {
+                           Debug.Log("⚡ MainMenuController: Quick Play button clicked!");
+                           StartQuickPlay();
+                       });
+
+        // New Local Game Button
         newGameButton = CreateUIButton("NewLocalGameButton", "New Local Game", mainMenuPanel,
-                                     new Vector2(0.1f, 0.42f), new Vector2(0.9f, 0.57f),
+                                     new Vector2(0.1f, 0.30f), new Vector2(0.9f, 0.44f),
                                      () => {
                                          Debug.Log("🎮 MainMenuController: New Local Game button clicked!");
                                          StartEnhancedFlow();
@@ -773,7 +791,7 @@ public class MainMenuController : MonoBehaviour
 
         // New Online Game Button - middle button
         Button newOnlineGameButton = CreateUIButton("NewOnlineGameButton", "New Online Game", mainMenuPanel,
-                                   new Vector2(0.1f, 0.27f), new Vector2(0.9f, 0.42f),
+                                   new Vector2(0.1f, 0.15f), new Vector2(0.9f, 0.29f),
                                    () => {
                                        Debug.Log("🌐 MainMenuController: New Online Game button clicked!");
                                        StartOnlineMultiplayerFlow();
@@ -781,7 +799,7 @@ public class MainMenuController : MonoBehaviour
 
         // Exit Button - smaller and lower
         exitButton = CreateUIButton("ExitButton", "Exit", mainMenuPanel,
-                                   new Vector2(0.3f, 0.1f), new Vector2(0.7f, 0.22f),
+                                   new Vector2(0.3f, 0.02f), new Vector2(0.7f, 0.13f),
                                    () => {
                                        Debug.Log("🚪 MainMenuController: Exit button clicked!");
                                        QuitGame();

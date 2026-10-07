@@ -20,8 +20,8 @@ public class PlacementUI : MonoBehaviour
     private void Start()
     {
         // Calculate UI positions
-        deselectButtonRect = new Rect(20, 140, buttonWidth, buttonHeight);
-        stateInfoRect = new Rect(20, 380, buttonWidth * 2, buttonHeight * 2);
+        deselectButtonRect = new Rect(20, 200, buttonWidth, buttonHeight);
+        stateInfoRect = new Rect(20, 80, buttonWidth * 3, 55);
 
         // Calculate ready button positions dynamically based on player count
         CalculatePlayerReadyButtonPositions();
@@ -128,9 +128,16 @@ public class PlacementUI : MonoBehaviour
             return;
         }
 
+        // Layout is authored at 160 dpi; scale it up on high-density screens (phones)
+        // and keep it inside the safe area so the notch and home indicator don't cover it
+        Vector2 uiSize = TouchGUI.Begin();
+        float uiWidth = uiSize.x;
+        float uiHeight = uiSize.y;
+
         // Set GUI style
         GUI.skin.button.fontSize = 14; // Reduced from 16 for better fit in narrow buttons
         GUI.skin.label.fontSize = 14;
+        GUI.skin.label.normal.textColor = NeonTheme.Lavender;
 
         // Game state info
         GUI.Label(stateInfoRect, currentStateText);
@@ -146,10 +153,12 @@ public class PlacementUI : MonoBehaviour
             // MULTI-PLAYER SUPPORT: Always show individual ready buttons for all active players
             ShowMultiPlayerReadyButtons();
 
+            ShowAutoPlaceButtons();
+
             // Deselect button - only show if a piece is selected
             if (PlacementManager.Instance != null && HasSelectedTrayPiece())
             {
-                if (GUI.Button(deselectButtonRect, "Deselect Piece"))
+                if (TouchGUI.NeonButton(deselectButtonRect, "Deselect Piece", NeonTheme.Cyan, NeonTheme.Pink, outlined: true))
                 {
                     OnDeselectButtonClicked();
                 }
@@ -162,10 +171,34 @@ public class PlacementUI : MonoBehaviour
         string instructions = GetInstructions();
         if (!string.IsNullOrEmpty(instructions))
         {
-            Rect instructionsRect = new Rect(20, Screen.height - 120, Screen.width - 40, 100);
+            Rect instructionsRect = new Rect(20, uiHeight - 70, uiWidth - 40, 60);
             GUI.Label(instructionsRect, instructions);
         }
+
+        TouchGUI.End();
     }
+
+    /// <summary>
+    /// One "Auto-place" button per human player who still has pieces in their tray
+    /// </summary>
+    private void ShowAutoPlaceButtons()
+    {
+        if (PlacementManager.Instance == null || PlacementManager.Instance.IsAutoPlacing) return;
+
+        foreach (var entry in playerReadyButtonRects)
+        {
+            PieceColor player = entry.Key;
+            bool isHuman = TurnManager.Instance == null || !TurnManager.Instance.IsPlayerAI(player);
+            if (!isHuman || PlacementManager.Instance.IsPlayerPlacementCompleted(player)) continue;
+
+            Rect rect = new Rect(entry.Value.x, 140, entry.Value.width, buttonHeight);
+            if (TouchGUI.NeonButton(rect, $"Auto-place {player}", NeonTheme.Yellow, NeonTheme.Pink))
+            {
+                PlacementManager.Instance.AutoPlaceRemaining(player);
+            }
+        }
+    }
+
     
     /// <summary>
     /// Get color-tinted grey background color for a player (not ready state)
@@ -297,7 +330,7 @@ public class PlacementUI : MonoBehaviour
             string buttonText;
             if (playerReady)
             {
-                buttonText = $"{colorName}\nReady ✓";  // e.g., "White\nReady ✓"
+                buttonText = $"{colorName}\nReady";  // e.g., "White\nReady"
             }
             else if (allPiecesPlaced)
             {
@@ -329,7 +362,10 @@ public class PlacementUI : MonoBehaviour
             GUI.backgroundColor = buttonColor;
 
             // Draw button
-            if (GUI.Button(playerReadyButtonRects[player], buttonText))
+            Color fill = playerReady ? NeonTheme.Lime : allPiecesPlaced ? NeonTheme.Pink : NeonTheme.Lavender;
+            Rect readyRect = playerReadyButtonRects[player];
+            int readyFont = readyRect.width < 110f ? 12 : 15; // narrower buttons with 4-6 players
+            if (TouchGUI.NeonButton(readyRect, buttonText, fill, NeonTheme.Cyan, outlined: !playerReady && !allPiecesPlaced, fontSize: readyFont))
             {
                 OnPlayerReadyButtonClicked(player);
             }

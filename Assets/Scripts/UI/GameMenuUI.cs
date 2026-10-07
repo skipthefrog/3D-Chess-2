@@ -63,68 +63,53 @@ public class GameMenuUI : MonoBehaviour
     /// </summary>
     private void InitializeStyles()
     {
-        // Menu box background
-        menuBoxStyle = new GUIStyle();
-        menuBoxStyle.normal.background = CreateColorTexture(new Color(0.15f, 0.15f, 0.15f, 0.95f));
-        menuBoxStyle.border = new RectOffset(10, 10, 10, 10);
-        menuBoxStyle.padding = new RectOffset(20, 20, 20, 20);
-        
-        // Overlay background
-        overlayStyle = new GUIStyle();
-        overlayStyle.normal.background = CreateColorTexture(new Color(0f, 0f, 0f, 0.6f));
-        
-        // Title style
-        titleStyle = new GUIStyle();
-        titleStyle.fontSize = Mathf.RoundToInt(Screen.height * 0.03f);
-        titleStyle.fontStyle = FontStyle.Bold;
-        titleStyle.alignment = TextAnchor.MiddleCenter;
-        titleStyle.normal.textColor = Color.white;
-        titleStyle.wordWrap = true;
-        
-        // Button style
-        buttonStyle = new GUIStyle();
-        buttonStyle.fontSize = Mathf.RoundToInt(Screen.height * 0.022f);
-        buttonStyle.fontStyle = FontStyle.Bold;
-        buttonStyle.alignment = TextAnchor.MiddleCenter;
-        buttonStyle.normal.textColor = Color.white;
-        buttonStyle.normal.background = CreateColorTexture(new Color(0.3f, 0.3f, 0.3f, 1f));
-        buttonStyle.hover.background = CreateColorTexture(new Color(0.5f, 0.5f, 0.5f, 1f));
-        buttonStyle.active.background = CreateColorTexture(new Color(0.2f, 0.2f, 0.2f, 1f));
-        buttonStyle.border = new RectOffset(5, 5, 5, 5);
-        buttonStyle.padding = new RectOffset(15, 15, 12, 12);
-        
-        // Info style for status text
-        infoStyle = new GUIStyle();
-        infoStyle.fontSize = Mathf.RoundToInt(Screen.height * 0.018f);
-        infoStyle.alignment = TextAnchor.MiddleCenter;
-        infoStyle.normal.textColor = new Color(0.8f, 0.8f, 0.8f, 1f);
-        infoStyle.wordWrap = true;
-        
-        // Human draw offer style (blue tint for human player actions)
-        humanDrawOfferStyle = new GUIStyle();
-        humanDrawOfferStyle.fontSize = Mathf.RoundToInt(Screen.height * 0.02f);
-        humanDrawOfferStyle.fontStyle = FontStyle.Bold;
-        humanDrawOfferStyle.alignment = TextAnchor.MiddleCenter;
-        humanDrawOfferStyle.normal.textColor = new Color(0.4f, 0.7f, 1f, 1f); // Light blue
-        humanDrawOfferStyle.wordWrap = true;
-        
-        // AI draw offer style (orange tint for AI player actions)
-        aiDrawOfferStyle = new GUIStyle();
-        aiDrawOfferStyle.fontSize = Mathf.RoundToInt(Screen.height * 0.02f);
-        aiDrawOfferStyle.fontStyle = FontStyle.Bold;
-        aiDrawOfferStyle.alignment = TextAnchor.MiddleCenter;
-        aiDrawOfferStyle.normal.textColor = new Color(1f, 0.6f, 0.3f, 1f); // Orange
-        aiDrawOfferStyle.wordWrap = true;
-        
-        // Calculate menu rect - FIXED SIZE to always accommodate 4 buttons
-        float menuWidth = 400f;  // Fixed width
-        float menuHeight = 380f; // Fixed height (title + status + 4 buttons + padding)
-        float menuX = (Screen.width - menuWidth) / 2f;
-        float menuY = (Screen.height - menuHeight) / 2f;
+        // Neon look, sized in TouchGUI's scaled units so it is large on phones
+        Color ground = NeonTheme.Ground;
 
-        menuRect = new Rect(menuX, menuY, menuWidth, menuHeight);
-        overlayRect = new Rect(0, 0, Screen.width, Screen.height);
-        
+        menuBoxStyle = new GUIStyle();
+        menuBoxStyle.normal.background = CreateColorTexture(new Color(ground.r, ground.g, ground.b, 0.97f));
+        menuBoxStyle.border = new RectOffset(10, 10, 10, 10);
+        menuBoxStyle.padding = new RectOffset(24, 24, 18, 18);
+
+        overlayStyle = new GUIStyle();
+        overlayStyle.normal.background = CreateColorTexture(new Color(ground.r, ground.g, ground.b, 0.7f));
+
+        titleStyle = new GUIStyle();
+        titleStyle.font = NeonTheme.DisplayFont;
+        titleStyle.fontSize = 26;
+        titleStyle.alignment = TextAnchor.MiddleCenter;
+        titleStyle.normal.textColor = NeonTheme.Lime;
+        titleStyle.wordWrap = true;
+
+        buttonStyle = new GUIStyle();
+        buttonStyle.font = NeonTheme.BodyFont;
+        buttonStyle.fontSize = 19;
+        buttonStyle.alignment = TextAnchor.MiddleCenter;
+        buttonStyle.normal.textColor = ground;
+        buttonStyle.hover.textColor = ground;
+        buttonStyle.active.textColor = ground;
+        buttonStyle.normal.background = CreateColorTexture(NeonTheme.Pink);
+        buttonStyle.hover.background = CreateColorTexture(NeonTheme.Pink);
+        buttonStyle.active.background = CreateColorTexture(NeonTheme.PinkSoft);
+        buttonStyle.border = new RectOffset(5, 5, 5, 5);
+        buttonStyle.padding = new RectOffset(15, 15, 10, 10);
+        buttonStyle.margin = new RectOffset(0, 0, 6, 6);
+
+        infoStyle = new GUIStyle();
+        infoStyle.font = NeonTheme.BodyFont;
+        infoStyle.fontSize = 15;
+        infoStyle.alignment = TextAnchor.MiddleCenter;
+        infoStyle.normal.textColor = NeonTheme.Lavender;
+        infoStyle.wordWrap = true;
+
+        humanDrawOfferStyle = new GUIStyle(infoStyle);
+        humanDrawOfferStyle.fontSize = 16;
+        humanDrawOfferStyle.normal.textColor = NeonTheme.Cyan;
+
+        aiDrawOfferStyle = new GUIStyle(infoStyle);
+        aiDrawOfferStyle.fontSize = 16;
+        aiDrawOfferStyle.normal.textColor = NeonTheme.Yellow;
+
         stylesInitialized = true;
     }
     
@@ -146,10 +131,11 @@ public class GameMenuUI : MonoBehaviour
     {
         if (!enableGameMenu) return;
         
-        // Only show menu during gameplay
-        if (GameStateManager.Instance == null || !GameStateManager.Instance.CanMovePieces())
+        // Available during setup (piece placement) as well as play; actions like forfeit
+        // check their own conditions
+        if (GameStateManager.Instance == null)
         {
-            Debug.LogWarning("GameMenuUI: Cannot show menu - not in playing state");
+            Debug.LogWarning("GameMenuUI: Cannot show menu - no game state");
             return;
         }
         
@@ -334,6 +320,15 @@ public class GameMenuUI : MonoBehaviour
         // Skip if confirmation dialog is open
         if (ConfirmationDialog.Instance != null && ConfirmationDialog.Instance.IsDialogActive()) return;
         
+        // Scaled for the screen's density and kept inside the safe area
+        GUI.depth = -20; // above the other in-game buttons
+        Vector2 ui = TouchGUI.Begin();
+        float menuWidth = Mathf.Min(380f, ui.x - 40f);
+        float menuHeight = Mathf.Min(380f, ui.y - 16f);
+        menuRect = new Rect((ui.x - menuWidth) / 2f, (ui.y - menuHeight) / 2f, menuWidth, menuHeight);
+        overlayRect = new Rect(-ui.x, -ui.y, ui.x * 3f, ui.y * 3f); // reaches past the safe area
+        TouchGUI.Block(new Rect(0, 0, ui.x, ui.y));
+
         // Draw overlay
         GUI.Box(overlayRect, "", overlayStyle);
         
@@ -341,6 +336,7 @@ public class GameMenuUI : MonoBehaviour
         if (Event.current.type == EventType.MouseDown && !menuRect.Contains(Event.current.mousePosition))
         {
             HideMenu();
+            TouchGUI.End();
             return;
         }
         
@@ -427,7 +423,7 @@ public class GameMenuUI : MonoBehaviour
             else if (canOfferDraw)
             {
                 // Show offer draw button
-                if (GUILayout.Button("Offer Draw (D)", buttonStyle, GUILayout.Height(40)))
+                if (GUILayout.Button(Application.isMobilePlatform ? "Offer Draw" : "Offer Draw (D)", buttonStyle, GUILayout.Height(40)))
                 {
                     HandleDrawOffer();
                 }
@@ -463,7 +459,7 @@ public class GameMenuUI : MonoBehaviour
                 buttonStyle.normal.textColor = Color.gray;
             }
             
-            if (GUILayout.Button("Forfeit (F)", buttonStyle, GUILayout.Height(40)))
+            if (GUILayout.Button(Application.isMobilePlatform ? "Forfeit" : "Forfeit (F)", buttonStyle, GUILayout.Height(40)))
             {
                 HandleForfeit();
             }
@@ -483,11 +479,16 @@ public class GameMenuUI : MonoBehaviour
         GUILayout.FlexibleSpace();
         
         // Instructions
-        GUILayout.Label("Press ESC to toggle menu", infoStyle);
+        if (!Application.isMobilePlatform)
+        {
+            GUILayout.Label("Press ESC to toggle menu", infoStyle);
+        }
         GUILayout.Space(10);
         
         GUILayout.EndVertical();
         GUILayout.EndArea();
+        NeonTheme.GUIPanel(menuRect, NeonTheme.Cyan, 0f); // neon border over the panel
+        TouchGUI.End();
     }
     
     /// <summary>

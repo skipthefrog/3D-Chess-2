@@ -11,8 +11,8 @@ public class CoordinateLabelsUI : MonoBehaviour
 {
     [Header("Label Settings")]
     public bool enableLabels = true;
-    public int fontSize = 32;
-    public float labelOpacity = 0.25f; // 25% transparency
+    public int fontSize = 18;
+    public float labelOpacity = 0.35f; // see-through, but readable over the backdrops
     public Color labelColor = new Color(0.2f, 0.2f, 0.2f); // Dark grey
     public float labelDistance = 2.0f; // Distance from board edge
 
@@ -58,8 +58,21 @@ public class CoordinateLabelsUI : MonoBehaviour
 
         if (enableLabels)
         {
-            CreateCoordinateLabels();
+            StartCoroutine(CreateWhenBoardReady());
         }
+    }
+
+    // The board (and its "Pieces Container") is built a frame or two after Start;
+    // labels placed before then landed in the wrong spot
+    private System.Collections.IEnumerator CreateWhenBoardReady()
+    {
+        float waited = 0f;
+        while ((ChessBoard.Instance == null || GameObject.Find("Pieces Container") == null) && waited < 5f)
+        {
+            waited += Time.deltaTime;
+            yield return null;
+        }
+        CreateCoordinateLabels();
     }
 
     private void LateUpdate()
@@ -80,8 +93,11 @@ public class CoordinateLabelsUI : MonoBehaviour
 
         // Create parent container
         labelContainer = new GameObject("CoordinateLabels");
-        labelContainer.transform.SetParent(transform);
+        GameObject piecesContainer = GameObject.Find("Pieces Container");
+        // Live in the board's own space so labels stay lined up when the board turns
+        labelContainer.transform.SetParent(piecesContainer != null ? piecesContainer.transform : transform, false);
         labelContainer.transform.localPosition = Vector3.zero;
+        labelContainer.transform.localRotation = Quaternion.identity;
 
         // Get board dimensions
         Vector3Int boardDims = GetBoardDimensions();
@@ -99,80 +115,64 @@ public class CoordinateLabelsUI : MonoBehaviour
         Debug.Log($"CoordinateLabelsUI: Created {fileLabels.Count} file labels, {levelLabels.Count} level labels, {rankLabels.Count} rank labels");
     }
 
+    // Board-local geometry: cell centres sit at index * cell, floors at y * cell - half
+    private const float Cell = 2.8f;
+    private const float Half = Cell / 2f;
+    private const float Margin = 0.7f; // gap between the board edge and a label
+
     /// <summary>
-    /// Create file labels (A-H) along the front-bottom edge of the board (between Green and Yellow)
+    /// Files (A, B, C, D… uppercase) along the bottom front edge, one under each column
     /// </summary>
     private void CreateFileLabels(Vector3Int boardDims)
     {
-        string[] fileLabels = ChessNotationConverter.GetFileLabels();
-
+        string[] labels = ChessNotationConverter.GetFileLabels();
         for (int x = 0; x < boardDims.x; x++)
         {
-            // Position along front-bottom edge (varying X, Y=0, Z=0)
-            BoardPosition pos = new BoardPosition(x, 0, 0);
-            Vector3 worldPos = GetWorldPositionForLabel(pos);
-
-            // Offset back and down from board vertex (matches rank label pattern)
-            worldPos += Vector3.back * labelDistance + Vector3.down * labelDistance;
-            worldPos.y += fileLabelsYOffset;
-
-            GameObject label = CreateLabel($"FileLabel_{fileLabels[x]}", fileLabels[x], worldPos);
-            this.fileLabels.Add(label);
+            string text = labels[x].ToUpperInvariant();
+            Vector3 local = new Vector3(x * Cell, -Half, -Half - Margin);
+            GameObject label = CreateLabel($"FileLabel_{text}", text, local, display: true);
+            fileLabels.Add(label);
         }
     }
 
     /// <summary>
-    /// Create level labels (1-8) along the left-front vertical edge of the board (between White and Green)
+    /// Levels (1, 2, 3…) up the front left vertical edge, level with each floor's middle
     /// </summary>
     private void CreateLevelLabels(Vector3Int boardDims)
     {
-        string[] levelLabels = ChessNotationConverter.GetLevelLabels();
-
+        string[] labels = ChessNotationConverter.GetLevelLabels();
         for (int y = 0; y < boardDims.y; y++)
         {
-            // Position along left-front vertical edge (X=0, varying Y, Z=0)
-            BoardPosition pos = new BoardPosition(0, y, 0);
-            Vector3 worldPos = GetWorldPositionForLabel(pos);
-
-            // Offset left and back from board vertex (away into empty space)
-            worldPos += Vector3.left * labelDistance + Vector3.back * labelDistance;
-            worldPos.y += levelLabelsYOffset;
-
-            GameObject label = CreateLabel($"LevelLabel_{levelLabels[y]}", levelLabels[y], worldPos);
-            this.levelLabels.Add(label);
+            Vector3 local = new Vector3(-Half - Margin, y * Cell, -Half - Margin);
+            GameObject label = CreateLabel($"LevelLabel_{labels[y]}", labels[y], local, display: true);
+            levelLabels.Add(label);
         }
     }
 
     /// <summary>
-    /// Create rank labels (a-h) along the left-bottom edge of the board (between White and Yellow)
+    /// Ranks (a, b, c, d… lowercase) along the bottom left edge, one beside each row
     /// </summary>
     private void CreateRankLabels(Vector3Int boardDims)
     {
-        string[] rankLabels = ChessNotationConverter.GetRankLabels();
-
+        string[] labels = ChessNotationConverter.GetRankLabels();
         for (int z = 0; z < boardDims.z; z++)
         {
-            // Position along left-bottom edge (X=0, Y=0, varying Z)
-            BoardPosition pos = new BoardPosition(0, 0, z);
-            Vector3 worldPos = GetWorldPositionForLabel(pos);
-
-            // Offset left and downward from board
-            worldPos += Vector3.left * labelDistance + Vector3.down * labelDistance;
-            worldPos.y += rankLabelsYOffset;
-
-            GameObject label = CreateLabel($"RankLabel_{rankLabels[z]}", rankLabels[z], worldPos);
-            this.rankLabels.Add(label);
+            string text = labels[z].ToLowerInvariant();
+            Vector3 local = new Vector3(-Half - Margin, -Half, z * Cell);
+            // Bungee has no lowercase letters, so the ranks use the rounded body font
+            GameObject label = CreateLabel($"RankLabel_{text}", text, local, display: false);
+            rankLabels.Add(label);
         }
     }
 
     /// <summary>
     /// Create a single text label
     /// </summary>
-    private GameObject CreateLabel(string name, string text, Vector3 position)
+    private GameObject CreateLabel(string name, string text, Vector3 localPosition, bool display)
     {
         GameObject labelObj = new GameObject(name);
-        labelObj.transform.SetParent(labelContainer.transform);
-        labelObj.transform.position = position;
+        labelObj.transform.SetParent(labelContainer.transform, false);
+        labelObj.transform.localPosition = localPosition;
 
         // Add TextMeshPro component
         TextMeshPro textMesh = labelObj.AddComponent<TextMeshPro>();
@@ -180,13 +180,20 @@ public class CoordinateLabelsUI : MonoBehaviour
         textMesh.fontSize = fontSize;
         textMesh.alignment = TextAlignmentOptions.Center;
 
-        // Set color with opacity
-        Color colorWithOpacity = labelColor;
+        // Neon style: the game's display font in cyan, still see-through so it never hides pieces
+        Color colorWithOpacity = NeonTheme.Cyan;
         colorWithOpacity.a = labelOpacity;
         textMesh.color = colorWithOpacity;
 
-        // Set font
-        textMesh.font = Resources.Load<TMP_FontAsset>("LiberationSans SDF");
+        TMP_FontAsset neonFont = display ? NeonTheme.DisplayTMP : NeonTheme.BodyTMP;
+        if (neonFont != null)
+        {
+            textMesh.font = neonFont;
+        }
+        else
+        {
+            textMesh.font = Resources.Load<TMP_FontAsset>("LiberationSans SDF");
+        }
 
         // Configure for world space
         RectTransform rectTransform = labelObj.GetComponent<RectTransform>();

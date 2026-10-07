@@ -1,6 +1,8 @@
 using UnityEditor;
 using UnityEngine;
 using System.IO;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 
 /// <summary>
 /// Automated build script for WebGL with proper configuration
@@ -43,6 +45,8 @@ public class WebGLBuildScript
     {
         Debug.Log("⚙️ Configuring WebGL Player Settings...");
 
+        BuildShaderIncludes.EnsureIncluded();
+
         // Compression
         PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Brotli;
 
@@ -53,12 +57,12 @@ public class WebGLBuildScript
         if (isProduction)
         {
             PlayerSettings.SetIl2CppCompilerConfiguration(BuildTargetGroup.WebGL, Il2CppCompilerConfiguration.Master);
-            EditorUserBuildSettings.il2CppCodeGeneration = Il2CppCodeGeneration.OptimizeSize;
+            PlayerSettings.SetIl2CppCodeGeneration(NamedBuildTarget.WebGL, Il2CppCodeGeneration.OptimizeSize);
         }
         else
         {
             PlayerSettings.SetIl2CppCompilerConfiguration(BuildTargetGroup.WebGL, Il2CppCompilerConfiguration.Debug);
-            EditorUserBuildSettings.il2CppCodeGeneration = Il2CppCodeGeneration.OptimizeSpeed;
+            PlayerSettings.SetIl2CppCodeGeneration(NamedBuildTarget.WebGL, Il2CppCodeGeneration.OptimizeSpeed);
         }
 
         // Exception handling (smaller build size)

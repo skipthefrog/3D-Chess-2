@@ -382,10 +382,10 @@ public class PieceTray : MonoBehaviour
         switch (trayColor)
         {
             case PieceColor.White:
-                material.color = new Color(0.9f, 0.9f, 0.9f, 0.8f); // Light gray
+                material.color = NeonTheme.Lavender; // neon style: soft lavender for White
                 break;
             case PieceColor.Black:
-                material.color = new Color(0.3f, 0.3f, 0.3f, 0.8f); // Dark gray
+                material.color = NeonTheme.Muted; // neon style: deep violet for Black
                 break;
             case PieceColor.Green:
                 material.color = new Color(0.15f, 0.5f, 0.15f, 0.8f); // Darker forest green

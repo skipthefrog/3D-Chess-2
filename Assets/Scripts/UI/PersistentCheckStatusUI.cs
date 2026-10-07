@@ -20,13 +20,14 @@ public class PersistentCheckStatusUI : MonoBehaviour
     public Color safeColor = Color.green;
     public Color checkColor = Color.red;
     public Color currentTurnColor = new Color(0.3f, 0.6f, 1f, 1f); // Blue for current turn
-    public Color backgroundColor = new Color(0f, 0f, 0f, 0.8f);
+    public Color backgroundColor = new Color(0.078f, 0f, 0.18f, 0.45f); // neon ground (#14002E), see-through so backdrops show
     
     [Header("Status Icons")]
-    public string safeIcon = "✓";
-    public string checkIcon = "⚠️";
-    public string checkmateIcon = "💀";
-    public string turnIcon = "▶";
+    // Plain text: the game's font has no glyphs for check marks, warning signs or emoji
+    public string safeIcon = "ok";
+    public string checkIcon = "CHECK!";
+    public string checkmateIcon = "MATE";
+    public string turnIcon = ">";
     
     // UI Components
     private Canvas statusCanvas;
@@ -201,7 +202,8 @@ public class PersistentCheckStatusUI : MonoBehaviour
         statusText.fontSize = fontSize;
         statusText.fontStyle = FontStyle.Bold;
         statusText.alignment = TextAnchor.MiddleCenter;
-        statusText.color = Color.white;
+        statusText.color = NeonTheme.Lime;
+        if (NeonTheme.BodyFont != null) statusText.font = NeonTheme.BodyFont;
         
         RectTransform textRect = textObject.GetComponent<RectTransform>();
         textRect.anchorMin = Vector2.zero;
@@ -1102,7 +1104,7 @@ public class PersistentCheckStatusUI : MonoBehaviour
             if (anyPlayerInCheck)
             {
                 // Red background if anyone is in check
-                backgroundImage.color = new Color(0.8f, 0.2f, 0.2f, 0.85f);
+                backgroundImage.color = new Color(NeonTheme.Pink.r, NeonTheme.Pink.g, NeonTheme.Pink.b, 0.9f);
 
                 // Add pulsing effect for check status
                 StartCoroutine(PulseEffect());
@@ -1110,7 +1112,7 @@ public class PersistentCheckStatusUI : MonoBehaviour
             else if (currentGameState == GameState.PiecePlacement)
             {
                 // Blue-tinted background for placement phase
-                backgroundImage.color = new Color(0.2f, 0.3f, 0.6f, 0.8f);
+                backgroundImage.color = backgroundColor;
             }
             else
             {
