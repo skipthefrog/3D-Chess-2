@@ -1085,13 +1085,12 @@ public class PlacementManager : MonoBehaviour
             return null;
         }
 
-        Material material = new Material(indicatorShader);
-
-        // Set color (works with all shader types)
-        material.color = color;
-
-        // Render queue for transparency
-        material.renderQueue = 3000; // Render after opaque objects
+        // Solid, unlit neon so the dots stay bright even behind the see-through floors
+        // of the big cubes (eight stacked translucent floors washed out transparent dots)
+        Shader unlit = Shader.Find("Unlit/Color");
+        Material material = new Material(unlit != null ? unlit : indicatorShader);
+        material.color = new Color(color.r, color.g, color.b, 1f);
+        if (unlit == null) material.renderQueue = 3000;
 
         Debug.Log($"🎨 PlacementManager: Created placement material with shader {indicatorShader.name}, color {color}");
 
@@ -1105,13 +1104,9 @@ public class PlacementManager : MonoBehaviour
     {
         return pieceColor switch
         {
-            PieceColor.White => Color.white,
-            PieceColor.Black => new Color(0.2f, 0.2f, 0.2f), // Dark gray (black is too dark)
-            PieceColor.Green => Color.green,
-            PieceColor.Purple => new Color(0.6f, 0.2f, 0.8f), // Purple
-            PieceColor.Yellow => Color.yellow,
-            PieceColor.Orange => new Color(1.0f, 0.5f, 0.0f), // Orange
-            _ => Color.white
+            // The neon team colors (PieceSets.Tint), with White as bright cyan so it reads on pale floors
+            PieceColor.White => NeonTheme.Cyan,
+            _ => PieceSets.Tint(PieceSets.Kind.NeonGlow, pieceColor)
         };
     }
 

@@ -206,8 +206,8 @@ public class InputManager : MonoBehaviour
         
         Ray ray = gameCamera.ScreenPointToRay(screenPosition);
         RaycastHit hit;
-        
-        if (Physics.Raycast(ray, out hit, Mathf.Infinity, interactableLayer))
+
+        if (RaycastForInteractable(ray, out hit))
         {
             // Check for placement target clicks first (during placement phase)
             PlacementTargetData placementData = hit.collider.GetComponent<PlacementTargetData>();
@@ -527,6 +527,31 @@ public class InputManager : MonoBehaviour
     /// <summary>
     /// Add blue glow effect to a capturable enemy piece
     /// </summary>
+    /// <summary>
+    /// The nearest hit that is something you can tap (placement dot, move target or piece).
+    /// On the big cubes, board cells and benches can sit in front of a dot; taps go through them.
+    /// Falls back to the nearest hit of any kind.
+    /// </summary>
+    private bool RaycastForInteractable(Ray ray, out RaycastHit result)
+    {
+        RaycastHit[] hits = Physics.RaycastAll(ray, Mathf.Infinity, interactableLayer);
+        result = default;
+        if (hits.Length == 0) return false;
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+        foreach (RaycastHit h in hits)
+        {
+            if (h.collider.GetComponent<PlacementTargetData>() != null ||
+                h.collider.GetComponent<MoveTargetData>() != null ||
+                h.collider.GetComponent<ChessPiece>() != null)
+            {
+                result = h;
+                return true;
+            }
+        }
+        result = hits[0];
+        return true;
+    }
+
     private void AddCapturableGlow(ChessPiece piece)
     {
         if (piece == null) return;
