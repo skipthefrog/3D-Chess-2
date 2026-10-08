@@ -1,3 +1,4 @@
+import { isGeneratedName, randomName } from './names.js';
 // ─────────────────────────────────────────────────────────────────────────────
 // Guest tokens: base64url(JSON payload) + "." + base64url(HMAC-SHA256 signature).
 // No accounts yet; a token just gives a player a stable id so they can reconnect
@@ -52,7 +53,8 @@ export async function verifyToken(secret: string, token: string | null): Promise
 }
 
 /** Display names: trimmed, printable, 1–20 characters */
+/** Only generated names are accepted (see names.ts); anything else gets a fresh generated name */
 export function cleanName(raw: unknown): string {
-  const name = typeof raw === 'string' ? raw.replace(/[^\p{L}\p{N} _.-]/gu, '').trim().slice(0, 20) : '';
-  return name || `Player${Math.floor(1000 + Math.random() * 9000)}`;
+  const name = typeof raw === 'string' ? raw.trim() : '';
+  return isGeneratedName(name) ? name : randomName();
 }

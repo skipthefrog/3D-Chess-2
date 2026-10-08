@@ -102,6 +102,7 @@ public class OnlineClient : MonoBehaviour
             var auth = JsonUtility.FromJson<AuthResponse>(request.downloadHandler.text);
             PlayerPrefs.SetString("OnlineToken", auth.token);
             PlayerPrefs.SetString("OnlineName", auth.name);
+            PlayerNames.Current = auth.name; // the server's copy wins if they ever differ
             PlayerPrefs.SetString("OnlineTokenServer", ServerUrl);
             PlayerPrefs.Save();
             done(true, null);

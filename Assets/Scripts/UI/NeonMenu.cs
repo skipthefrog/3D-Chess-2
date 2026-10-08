@@ -617,7 +617,8 @@ public class NeonMenu : MonoBehaviour
     // ───────────────────────── Online ─────────────────────────
 
     private GameObject onlineScreen;
-    private TMP_InputField nameInput, codeInput;
+    private TMP_InputField codeInput;
+    private TextMeshProUGUI nameLabel;
     private TextMeshProUGUI onlineStatus;
     private bool onlineBusy;
     private bool onlineStarting;
@@ -651,7 +652,24 @@ public class NeonMenu : MonoBehaviour
         RectTransform right = Card(root, "Match Card", NeonTheme.Pink, new Vector2(0.5f, 0f), new Vector2(1f, 1f), new Vector2(8, 60), new Vector2(-24, -74));
 
         SectionLabel(left, "Your name", NeonTheme.Cyan);
-        nameInput = InputField(left, "Name", PlayerPrefs.GetString("OnlineName", ""), 20);
+        // Names are generated (PlayerNames), never typed: nothing offensive can get in
+        RectTransform nameRow = Row(left);
+        Image nameBox = NewImage("Name", nameRow, NeonTheme.Cyan);
+        nameBox.sprite = NeonTheme.RoundedOutline;
+        nameBox.type = Image.Type.Sliced;
+        nameLabel = NewText("Text", nameBox.transform, PlayerNames.Current, 18, NeonTheme.White, TextAlignmentOptions.Center);
+        Stretch(nameLabel.rectTransform);
+        nameLabel.enableAutoSizing = true;
+        nameLabel.fontSizeMin = 12;
+        nameLabel.fontSizeMax = 18;
+        var nameSize = nameBox.gameObject.AddComponent<LayoutElement>();
+        nameSize.flexibleWidth = 1;
+        nameSize.preferredWidth = 200;
+        Button reroll = NeonButton(nameRow, "New name", new Vector2(0, 44), NeonTheme.Pink, NeonTheme.Cyan, 0f, 15, RerollName);
+        var rerollSize = reroll.gameObject.AddComponent<LayoutElement>();
+        rerollSize.preferredWidth = 110;
+        rerollSize.flexibleWidth = 0;
+        nameRow.GetComponent<HorizontalLayoutGroup>().childForceExpandWidth = false;
         SectionLabel(left, "Play a friend", NeonTheme.Cyan);
         RectTransform createRow = Row(left);
         NeonButton(createRow, "Create game", new Vector2(0, 44), NeonTheme.Lime, NeonTheme.Pink, 0f, 17, CreateOnlineGame);
@@ -794,10 +812,12 @@ public class NeonMenu : MonoBehaviour
 
     private void SetOnlineStatus(string text) => onlineStatus.text = text;
 
-    private string ChosenName()
+    private string ChosenName() => PlayerNames.Current;
+
+    private void RerollName()
     {
-        string name = nameInput.text.Trim();
-        return string.IsNullOrEmpty(name) ? "Player" : name;
+        if (onlineBusy) return; // keep the name stable while connecting or searching
+        nameLabel.text = PlayerNames.Reroll();
     }
 
     private void CreateOnlineGame() => StartCoroutine(CreateRoutine());
