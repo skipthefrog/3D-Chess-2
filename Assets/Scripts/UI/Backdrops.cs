@@ -13,9 +13,10 @@ public static class Backdrops
         NeonGlow = 0,
         DeepSpace = 1,
         NeonDesert = 2,
+        CyberCity = 3,
     }
 
-    public static readonly Kind[] All = { Kind.DeepSpace, Kind.NeonDesert, Kind.NeonGlow };
+    public static readonly Kind[] All = { Kind.DeepSpace, Kind.NeonDesert, Kind.CyberCity, Kind.NeonGlow };
 
     private const string PrefKey = "Backdrop";
 
@@ -35,6 +36,7 @@ public static class Backdrops
         {
             case Kind.DeepSpace: return "Deep Space";
             case Kind.NeonDesert: return "Neon Desert";
+            case Kind.CyberCity: return "Cyber City";
             default: return "Neon Glow";
         }
     }
@@ -45,6 +47,7 @@ public static class Backdrops
         {
             case Kind.DeepSpace: return "Stars, galaxies and glowing nebulae all around the board";
             case Kind.NeonDesert: return "Synthwave sunset over shifting sand dunes, with drifting dust";
+            case Kind.CyberCity: return "High above a rainy neon megacity at night, with flying traffic";
             default: return "Clean violet glow, easy on the eyes";
         }
     }
@@ -60,13 +63,14 @@ public static class Backdrops
         switch (kind)
         {
             case Kind.NeonDesert: return () => DesertSky.Generate(SkyWidth, SkyHeight, 1984);
+            case Kind.CyberCity: return () => CitySky.Generate(SkyWidth, SkyHeight, 2077);
             default: return () => SpaceSky.Generate(SkyWidth, SkyHeight, 20261006);
         }
     }
 
     // Color shown while a sky is still being generated
     private static Color LoadingColor(Kind kind) =>
-        kind == Kind.NeonDesert ? new Color32(30, 4, 50, 255) : new Color32(4, 2, 14, 255);
+        kind == Kind.NeonDesert ? new Color32(30, 4, 50, 255) : kind == Kind.CyberCity ? new Color32(20, 3, 40, 255) : new Color32(4, 2, 14, 255);
 
     /// <summary>
     /// Apply the chosen backdrop to a camera. Returns false while a sky is still being
@@ -133,6 +137,7 @@ public static class Backdrops
         cam.clearFlags = CameraClearFlags.Skybox;
 
         if (kind == Kind.NeonDesert) Scenery.BuildDesert(cam);
+        else if (kind == Kind.CyberCity) Scenery.BuildCity(cam);
         else Scenery.Clear();
 
         RefreshReflections();
@@ -262,6 +267,35 @@ public static class Scenery
 
         // Drifting sand dust around the board
         root.AddComponent<DesertDust>();
+    }
+
+    public static void BuildCity(Camera cam)
+    {
+        Clear();
+        fogWasOn = RenderSettings.fog;
+        savedAmbient = RenderSettings.ambientLight;
+        changed = true;
+
+        root = new GameObject("Cyber City Scenery");
+        CityScenery.Build(root.transform);
+
+        // Purple smog that swallows the far towers into the sky's horizon glow
+        RenderSettings.fog = true;
+        RenderSettings.fogMode = FogMode.Linear;
+        RenderSettings.fogColor = new Color(0.36f, 0.07f, 0.34f);
+        RenderSettings.fogStartDistance = 45f;
+        RenderSettings.fogEndDistance = 145f;
+
+        // Cool night light from above, with magenta city glow as ambient
+        RenderSettings.ambientLight = new Color(0.34f, 0.22f, 0.46f);
+        foreach (Light light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None))
+        {
+            if (light.type != LightType.Directional) continue;
+            savedLights[light] = (light.color, light.intensity, light.transform.rotation);
+            light.color = new Color(0.7f, 0.8f, 1f);
+            light.intensity = Mathf.Min(light.intensity, 0.9f);
+            light.transform.rotation = Quaternion.Euler(55f, -30f, 0f);
+        }
     }
 
     // Wind ripples in sand: soft wavy bands with fine grain, tiles seamlessly

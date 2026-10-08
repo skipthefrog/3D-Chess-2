@@ -581,6 +581,7 @@ public class NeonMenu : MonoBehaviour
         }, NeonTheme.Cyan, 16);
         ChipRow(right, new (string, System.Action, System.Func<bool>, System.Func<bool>)[]
         {
+            BackdropChip(Backdrops.Kind.CyberCity),
             BackdropChip(Backdrops.Kind.NeonGlow),
         }, NeonTheme.Cyan, 16);
         backdropNote = NewText("Note", right, "", 15, NeonTheme.Lavender, TextAlignmentOptions.TopLeft);
