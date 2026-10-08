@@ -157,6 +157,25 @@ public class PersistentCheckStatusUI : MonoBehaviour
     /// <summary>
     /// Create the persistent status UI elements
     /// </summary>
+    private static Sprite fadeDown;
+
+    // Opaque at the top, easing to fully clear at the bottom
+    private static Sprite FadeDownSprite()
+    {
+        if (fadeDown != null) return fadeDown;
+        const int h = 64;
+        var tex = new Texture2D(1, h, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+        for (int y = 0; y < h; y++)
+        {
+            float t = (float)y / (h - 1);              // 0 at the bottom row, 1 at the top
+            float a = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t * 1.6f - 0.1f));
+            tex.SetPixel(0, y, new Color(1f, 1f, 1f, a));
+        }
+        tex.Apply();
+        fadeDown = Sprite.Create(tex, new Rect(0, 0, 1, h), new Vector2(0.5f, 0.5f), 100f);
+        return fadeDown;
+    }
+
     private void CreatePersistentStatusUI()
     {
         Debug.Log("PersistentCheckStatusUI: Creating persistent status UI");
@@ -183,6 +202,9 @@ public class PersistentCheckStatusUI : MonoBehaviour
         
         backgroundImage = statusPanel.AddComponent<Image>();
         backgroundImage.color = backgroundColor;
+        // Fade out toward the bottom so the bar has no hard edge across the backdrop
+        backgroundImage.sprite = FadeDownSprite();
+        backgroundImage.type = Image.Type.Simple;
         
         RectTransform panelRect = statusPanel.GetComponent<RectTransform>();
         

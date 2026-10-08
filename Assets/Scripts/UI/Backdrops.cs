@@ -281,9 +281,12 @@ public static class Scenery
 
         // Just a light, dark night haze for depth; the pink comes from drifting wisps (CityWisps)
         RenderSettings.fog = true;
-        RenderSettings.fogMode = FogMode.ExponentialSquared;
-        RenderSettings.fogColor = new Color(0.1f, 0.03f, 0.16f);
-        RenderSettings.fogDensity = 0.0075f;
+        // Exactly the sky's horizon haze color, reaching full strength at the outer ring of towers,
+        // so the farthest towers melt into the haze instead of making a hard line against it
+        RenderSettings.fogMode = FogMode.Linear;
+        RenderSettings.fogColor = CitySky.HazeColor;
+        RenderSettings.fogStartDistance = 40f;
+        RenderSettings.fogEndDistance = 175f;
 
         // Cool night light from above, with magenta city glow as ambient
         RenderSettings.ambientLight = new Color(0.34f, 0.22f, 0.46f);

@@ -108,23 +108,42 @@ public static class CitySky
                         float tdx = (x - ax) / (float)width * 2f, tdv = v - tip;
                         c += new Color(1f, 0.15f, 0.2f) * Mathf.Exp(-(tdx * tdx + tdv * tdv) / 0.000008f);
                     }
+
+                    // Ground haze rising off the city: thickest at the horizon, thinning upward,
+                    // with a ragged, billowing top edge (no flat line) and wispy streaks inside
+                    float rise = horizon - v;
+                    float hazeTop = HazeHeight(u);
+                    if (rise < hazeTop)
+                    {
+                        float k = 1f - rise / hazeTop;
+                        float streak = 0.5f + 0.5f * Mathf.Sin(u * Mathf.PI * 2f * 23f + rise * 180f + Mathf.Sin(u * Mathf.PI * 2f * 4f) * 3f);
+                        float smooth = k * k * (3f - 2f * k);   // no kink at the horizon or the top
+                        float alpha = smooth * Mathf.Lerp(1f, 0.55f + 0.45f * streak, 1f - k);
+                        c = Color.Lerp(c, Haze, alpha);
+                    }
                 }
                 else
                 {
                     // Below the horizon: the city at night seen from far above, a sea of lights in haze
                     float below = v - horizon;
-                    c = Color.Lerp(new Color(0.32f, 0.07f, 0.28f), new Color(0.03f, 0.0f, 0.07f), Mathf.Clamp01(below * 16f));
+                    // The haze thins out downward too, over an uneven distance, so the horizon has no seam
+                    float thin = Mathf.Clamp01(below / (HazeHeight(u + 0.37f) * 0.7f));
+                    thin = thin * thin * (3f - 2f * thin);
+                    c = Color.Lerp(Haze, new Color(0.03f, 0.0f, 0.07f), thin);
                     float density = Mathf.Lerp(0.12f, 0.02f, Mathf.Clamp01(below * 3f));
                     float h = Hash(x / 2, y / 2, seed + 900);
-                    if (h < density)
+                    // Lights emerge out of the haze: invisible at the horizon, full strength a little below,
+                    // with a ragged boundary so there is no straight edge
+                    float emerge = Mathf.Clamp01((below - HazeHeight(u + 0.37f) * 0.3f) * 14f);
+                    if (h < density && emerge > 0f)
                     {
                         float pick = Hash(x / 2, y / 2, seed + 901);
                         Color light = pick < 0.6f ? new Color(1f, 0.75f, 0.4f) : pick < 0.82f ? NeonTheme.Cyan : NeonTheme.Pink;
-                        c = Color.Lerp(c, light, 0.6f * (1f - Mathf.Clamp01(below * 1.5f)) + 0.15f);
+                        c = Color.Lerp(c, light, (0.6f * (1f - Mathf.Clamp01(below * 1.5f)) + 0.15f) * emerge);
                     }
                     // Glowing avenues radiating out
                     float avenue = Mathf.Abs(Mathf.Sin(u * Mathf.PI * 2f * 9f + below * 14f));
-                    if (avenue < 0.025f) c += new Color(1f, 0.5f, 0.3f) * 0.35f * (1f - Mathf.Clamp01(below * 2f));
+                    if (avenue < 0.025f) c += new Color(1f, 0.5f, 0.3f) * 0.35f * (1f - Mathf.Clamp01(below * 2f)) * Mathf.Clamp01(below * 12f);
                 }
 
                 c.a = 1f;
@@ -132,6 +151,19 @@ public static class CitySky
             }
         }
         return result;
+    }
+
+    private static readonly Color Haze = new Color(0.3f, 0.07f, 0.27f);
+    public static Color HazeColor => Haze;
+
+    // Height of the haze above the horizon at each point around the sky: rolling, uneven billows
+    // (whole sine periods so it wraps around 360° without a seam)
+    private static float HazeHeight(float u)
+    {
+        float t = u * Mathf.PI * 2f;
+        float billow = 0.5f + 0.22f * Mathf.Sin(t * 3f + 1.1f) + 0.14f * Mathf.Sin(t * 7f + 0.4f)
+                     + 0.08f * Mathf.Sin(t * 17f + 2.3f) + 0.05f * Mathf.Abs(Mathf.Sin(t * 41f + 0.9f));
+        return 0.015f + 0.1f * Mathf.Clamp01(billow);
     }
 
     private class Layer
@@ -216,8 +248,9 @@ public static class CityScenery
             float d = 6f + (float)rng.NextDouble() * 8f;
             // The board floats high above the city: rooftops sit well below it, rising a
             // little with distance, with the odd skyscraper reaching up toward board level
-            float top = -48f + (radius - 78f) * 0.35f + (float)Math.Pow(rng.NextDouble(), 2.2) * 26f;
-            if (rng.NextDouble() < 0.08) top += 22f;
+            // Very uneven rooftops so the far skyline never reads as one flat-topped mass
+            float top = -62f + (float)Math.Pow(rng.NextDouble(), 1.4) * 58f;
+            if (rng.NextDouble() < 0.12) top += 18f + (float)rng.NextDouble() * 14f;
             float bottom = -140f;
             var tower = Box("Tower", towers, new Vector3(w, top - bottom, d), facade, true);
             Vector3 centre = new Vector3(Mathf.Cos(angle) * radius, (top + bottom) / 2f, Mathf.Sin(angle) * radius);
@@ -599,3 +632,4 @@ public class CityRain : MonoBehaviour
         ps.Play();
     }
 }
+
