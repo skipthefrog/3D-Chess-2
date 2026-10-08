@@ -208,11 +208,8 @@ public class BoardRotationUI : MonoBehaviour
             }
         }
         
-        // Touch controls for mobile - expanded screen edge zones
-        if (InputHelper.TouchCount == 1)
-        {
-            HandleTouchRotation();
-        }
+        // (Tapping the screen edges used to rotate the board a quarter turn. The edges hold the
+        // floor and player view buttons, so that is off; drag to orbit or use the view buttons.)
     }
     
     private void HandleTouchRotation()

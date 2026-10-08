@@ -355,6 +355,34 @@ public class CameraController : MonoBehaviour
         }
     }
     
+    /// <summary>
+    /// Smoothly swing the camera to look at the board from a direction (world space, pointing
+    /// from the board toward the camera). Used by the player view buttons.
+    /// </summary>
+    public void SnapToView(Vector3 fromDirection, float seconds = 0.6f)
+    {
+        if (fromDirection.sqrMagnitude < 0.0001f) return;
+        Vector3 v = fromDirection.normalized;
+        float yaw = Mathf.Atan2(-v.x, -v.z) * Mathf.Rad2Deg;
+        float pitch = Mathf.Asin(Mathf.Clamp(v.y, -1f, 1f)) * Mathf.Rad2Deg;
+        StopCoroutine(nameof(SnapRoutine));
+        StartCoroutine(SnapRoutine(yaw, Mathf.Clamp(pitch, -80f, 80f), seconds));
+    }
+
+    private System.Collections.IEnumerator SnapRoutine(float yaw, float pitch, float seconds)
+    {
+        float startYaw = currentHorizontalAngle, startPitch = currentVerticalAngle;
+        for (float t = 0f; t < seconds; t += Time.deltaTime)
+        {
+            float k = Mathf.SmoothStep(0f, 1f, t / seconds);
+            currentHorizontalAngle = Mathf.LerpAngle(startYaw, yaw, k);
+            currentVerticalAngle = Mathf.Lerp(startPitch, pitch, k);
+            yield return null;
+        }
+        currentHorizontalAngle = yaw;
+        currentVerticalAngle = pitch;
+    }
+
     public void SetTarget(Transform newTarget)
     {
         target = newTarget;

@@ -12,7 +12,7 @@ public class BoardRotator : MonoBehaviour
     public float smoothRotationSpeed = 180f; // degrees per second for smooth rotation
     
     [Header("Touch Controls")]
-    public bool enableTouchRotation = true;
+    public bool enableTouchRotation = false; // edge swipes collided with the on-screen buttons
     public float touchRotationSensitivity = 2f;
     public float screenEdgeZone = 0.15f; // 15% of screen width for edge zones
     
