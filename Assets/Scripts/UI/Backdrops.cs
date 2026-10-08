@@ -279,12 +279,11 @@ public static class Scenery
         root = new GameObject("Cyber City Scenery");
         CityScenery.Build(root.transform);
 
-        // Purple smog that swallows the far towers into the sky's horizon glow
+        // Just a light, dark night haze for depth; the pink comes from drifting wisps (CityWisps)
         RenderSettings.fog = true;
-        RenderSettings.fogMode = FogMode.Linear;
-        RenderSettings.fogColor = new Color(0.36f, 0.07f, 0.34f);
-        RenderSettings.fogStartDistance = 45f;
-        RenderSettings.fogEndDistance = 145f;
+        RenderSettings.fogMode = FogMode.ExponentialSquared;
+        RenderSettings.fogColor = new Color(0.1f, 0.03f, 0.16f);
+        RenderSettings.fogDensity = 0.0075f;
 
         // Cool night light from above, with magenta city glow as ambient
         RenderSettings.ambientLight = new Color(0.34f, 0.22f, 0.46f);

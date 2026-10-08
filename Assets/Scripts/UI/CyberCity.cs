@@ -47,7 +47,7 @@ public static class CitySky
                 {
                     // Night sky: ink at the top, violet, then a hot magenta glow of city light at the horizon
                     float t = Mathf.Pow(v / horizon, 1.8f);
-                    c = Lerp3(new Color(0.015f, 0.0f, 0.06f), new Color(0.13f, 0.02f, 0.27f), new Color(0.85f, 0.14f, 0.52f), t);
+                    c = Lerp3(new Color(0.015f, 0.0f, 0.06f), new Color(0.11f, 0.02f, 0.24f), new Color(0.6f, 0.1f, 0.42f), t);
                     // A thin cyan band of smog right at the horizon
                     c += new Color(0.05f, 0.35f, 0.45f) * Mathf.Exp(-Mathf.Pow((horizon - v) * 60f, 2f)) * 0.6f;
                     if (stars.Contains(y * width + x)) c += Color.white * 0.4f * (1f - t);
@@ -93,7 +93,7 @@ public static class CitySky
                         // Rooftop rim light
                         if (ly <= 1) body = Color.Lerp(body, L == 2 ? NeonTheme.Cyan : NeonTheme.Pink, 0.6f);
                         // Farther layers sink into the haze
-                        c = Color.Lerp(body, new Color(0.6f, 0.12f, 0.45f), L == 0 ? 0.35f : L == 1 ? 0.12f : 0f);
+                        c = Color.Lerp(body, new Color(0.45f, 0.1f, 0.4f), L == 0 ? 0.2f : L == 1 ? 0.06f : 0f);
                     }
 
                     // Antenna masts with red tip lights on the near layer
@@ -113,7 +113,7 @@ public static class CitySky
                 {
                     // Below the horizon: the city at night seen from far above, a sea of lights in haze
                     float below = v - horizon;
-                    c = Color.Lerp(new Color(0.55f, 0.12f, 0.42f), new Color(0.03f, 0.0f, 0.07f), Mathf.Clamp01(below * 7f));
+                    c = Color.Lerp(new Color(0.32f, 0.07f, 0.28f), new Color(0.03f, 0.0f, 0.07f), Mathf.Clamp01(below * 16f));
                     float density = Mathf.Lerp(0.12f, 0.02f, Mathf.Clamp01(below * 3f));
                     float h = Hash(x / 2, y / 2, seed + 900);
                     if (h < density)
@@ -271,6 +271,7 @@ public static class CityScenery
 
         root.gameObject.AddComponent<CityTraffic>();
         root.gameObject.AddComponent<CityRain>();
+        root.gameObject.AddComponent<CityWisps>();
     }
 
     // ───────── materials and meshes ─────────
@@ -480,6 +481,81 @@ public class CityTraffic : MonoBehaviour
             c.t.position = p;
             c.t.rotation = Quaternion.LookRotation(tangent);
         }
+    }
+}
+
+/// <summary>
+/// Thin, slow-drifting wisps of pink and violet haze among the rooftops: large, very
+/// faint soft puffs, so the city reads through them.
+/// </summary>
+public class CityWisps : MonoBehaviour
+{
+    private void Start()
+    {
+        var holder = new GameObject("Haze Wisps");
+        holder.transform.SetParent(transform, false);
+        holder.transform.position = new Vector3(0f, -36f, 0f);
+        var ps = holder.AddComponent<ParticleSystem>();
+        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var main = ps.main;
+        main.loop = true;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(28f, 45f);
+        main.startSpeed = 0f;
+        main.startSize3D = true;
+        main.startSizeX = new ParticleSystem.MinMaxCurve(30f, 60f);
+        main.startSizeY = new ParticleSystem.MinMaxCurve(6f, 12f);   // long, thin streaks
+        main.startSizeZ = 1f;
+        main.startRotation = new ParticleSystem.MinMaxCurve(-0.15f, 0.15f);
+        main.startColor = new ParticleSystem.MinMaxGradient(new Color(1f, 0.35f, 0.75f, 0.07f), new Color(0.6f, 0.35f, 1f, 0.05f));
+        main.maxParticles = 70;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.prewarm = true;
+        var emission = ps.emission;
+        emission.rateOverTime = 2f;
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Donut;   // a ring around the board, out among the towers
+        shape.radius = 95f;
+        shape.donutRadius = 30f;
+        shape.rotation = new Vector3(90f, 0f, 0f);
+        var velocity = ps.velocityOverLifetime;
+        velocity.enabled = true;
+        velocity.space = ParticleSystemSimulationSpace.World;
+        velocity.x = new ParticleSystem.MinMaxCurve(0.6f, 1.4f);
+        velocity.y = new ParticleSystem.MinMaxCurve(-0.1f, 0.1f);
+        velocity.z = new ParticleSystem.MinMaxCurve(-0.3f, 0.3f);
+        var fade = ps.colorOverLifetime;
+        fade.enabled = true;
+        var gradient = new Gradient();
+        gradient.SetKeys(
+            new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+            new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(1f, 0.3f), new GradientAlphaKey(1f, 0.7f), new GradientAlphaKey(0f, 1f) });
+        fade.color = gradient;
+        var renderer = holder.GetComponent<ParticleSystemRenderer>();
+        renderer.renderMode = ParticleSystemRenderMode.Billboard;
+        var mat = new Material(Shader.Find("Sprites/Default"));
+        mat.mainTexture = SoftPuff();
+        renderer.sharedMaterial = mat;
+        ps.Play();
+    }
+
+    // A soft, uneven blob that fades to nothing at the edges
+    private static Texture2D SoftPuff()
+    {
+        const int size = 64;
+        var tex = new Texture2D(size, size, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp };
+        var rng = new System.Random(9);
+        float ox = (float)rng.NextDouble() * 10f, oy = (float)rng.NextDouble() * 10f;
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+        {
+            float dx = (x + 0.5f) / size * 2f - 1f, dy = (y + 0.5f) / size * 2f - 1f;
+            float r = Mathf.Sqrt(dx * dx + dy * dy);
+            float n = Mathf.PerlinNoise(ox + x * 0.09f, oy + y * 0.09f);
+            float a = Mathf.Clamp01(1f - r) * (0.5f + 0.5f * n);
+            tex.SetPixel(x, y, new Color(1f, 1f, 1f, a * a));
+        }
+        tex.Apply(true);
+        return tex;
     }
 }
 
