@@ -88,6 +88,12 @@ public class iOSBuildScript
         // Plain http (the local test server) only in development builds; release builds use https
         PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
 
+        // App icon: the neon rook (rendered by Art/Pieces/render_app_icon.py). Unity scales the
+        // 1024×1024 default icon to every size iOS needs.
+        var icon = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Art/Icon/AppIcon.png");
+        if (icon != null) PlayerSettings.SetIcons(NamedBuildTarget.Unknown, new[] { icon }, IconKind.Any);
+        else Debug.LogWarning("iOSBuildScript: Assets/Art/Icon/AppIcon.png missing, app icon not set");
+
         // Landscape only until the UI is checked in portrait
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
         PlayerSettings.allowedAutorotateToPortrait = false;
