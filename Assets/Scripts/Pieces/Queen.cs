@@ -25,7 +25,7 @@ public class Queen : ChessPiece
                     // Get all valid moves in this direction until blocked or board edge
                     // GetValidMovesInDirection handles board bounds, obstacles, and capture logic
                     Vector3Int direction = new Vector3Int(dx, dy, dz);
-                    List<BoardPosition> movesInDirection = GetValidMovesInDirection(direction, 4); // Max 4 steps in 4x4x4 board
+                    List<BoardPosition> movesInDirection = GetValidMovesInDirection(direction); // Slides until the board edge or a piece
                     
                     validMoves.AddRange(movesInDirection);
                 }

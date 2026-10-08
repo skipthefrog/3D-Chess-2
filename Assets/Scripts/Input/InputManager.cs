@@ -528,9 +528,11 @@ public class InputManager : MonoBehaviour
     /// Add blue glow effect to a capturable enemy piece
     /// </summary>
     /// <summary>
-    /// The nearest hit that is something you can tap (placement dot, move target or piece).
-    /// On the big cubes, board cells and benches can sit in front of a dot; taps go through them.
-    /// Falls back to the nearest hit of any kind.
+    /// Pick what a tap meant, looking along the whole ray rather than just the first thing hit.
+    /// On the big cubes, board cells, benches and other pieces' (deliberately large) touch areas
+    /// often sit in front of the dot you aimed at, which made some captures impossible to tap.
+    /// Priority: the nearest placement/move dot or piece of the side to move; then any piece;
+    /// then the nearest hit of any kind.
     /// </summary>
     private bool RaycastForInteractable(Ray ray, out RaycastHit result)
     {
@@ -538,11 +540,22 @@ public class InputManager : MonoBehaviour
         result = default;
         if (hits.Length == 0) return false;
         System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        PieceColor? toMove = GameStateManager.Instance != null ? GameStateManager.Instance.GetCurrentPlayer() : (PieceColor?)null;
         foreach (RaycastHit h in hits)
         {
-            if (h.collider.GetComponent<PlacementTargetData>() != null ||
-                h.collider.GetComponent<MoveTargetData>() != null ||
-                h.collider.GetComponent<ChessPiece>() != null)
+            ChessPiece piece = h.collider.GetComponent<ChessPiece>();
+            bool isTarget = h.collider.GetComponent<PlacementTargetData>() != null || h.collider.GetComponent<MoveTargetData>() != null;
+            bool isOwnPiece = piece != null && toMove.HasValue && piece.pieceColor == toMove.Value && !piece.IsInTray();
+            if (isTarget || isOwnPiece)
+            {
+                result = h;
+                return true;
+            }
+        }
+        foreach (RaycastHit h in hits)
+        {
+            if (h.collider.GetComponent<ChessPiece>() != null)
             {
                 result = h;
                 return true;

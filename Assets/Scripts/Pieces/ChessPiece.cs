@@ -343,9 +343,13 @@ public abstract class ChessPiece : MonoBehaviour
         return true;
     }
     
-    protected List<BoardPosition> GetValidMovesInDirection(Vector3Int direction, int maxDistance = 4)
+    protected List<BoardPosition> GetValidMovesInDirection(Vector3Int direction, int maxDistance = int.MaxValue)
     {
         List<BoardPosition> validMoves = new List<BoardPosition>();
+
+        // Never further than the board's longest side (was a fixed 4, which cut moves short on 6³ and 8³ boards)
+        Vector3Int dims = BoardDimensionsManager.Instance != null ? BoardDimensionsManager.Instance.GetDimensions() : new Vector3Int(4, 4, 4);
+        maxDistance = Mathf.Min(maxDistance, Mathf.Max(dims.x, Mathf.Max(dims.y, dims.z)));
         
         for (int distance = 1; distance <= maxDistance; distance++)
         {
