@@ -20,7 +20,7 @@ public class NetworkManager : MonoBehaviour
     [Header("Server Configuration")]
     [SerializeField] private string serverUrl = "http://localhost:3000";
     [SerializeField] private bool useProductionUrl = false;  // Set to false for local development
-    [SerializeField] private string productionUrl = "https://928fb741c6db.ngrok-free.app"; // Current ngrok tunnel
+    [SerializeField] private string productionUrl = ""; // Legacy Socket.IO server; online play now uses OnlineClient
     [SerializeField] private bool autoConnect = false;
     [SerializeField] private float connectionTimeout = 10f;
 
@@ -223,12 +223,12 @@ public class NetworkManager : MonoBehaviour
             return productionUrl;
         }
 
-        // Try to auto-detect ngrok tunnel or use localhost
-        string detectedUrl = TryDetectNgrokUrl();
+        // Use a saved server URL if there is one, otherwise localhost
+        string detectedUrl = TryLoadSavedServerUrl();
         if (!string.IsNullOrEmpty(detectedUrl))
         {
             if (enableDebugLogging)
-                Debug.Log($"🌐 Auto-detected ngrok URL: {detectedUrl}");
+                Debug.Log($"🌐 Using saved server URL: {detectedUrl}");
             return detectedUrl;
         }
 
@@ -239,9 +239,9 @@ public class NetworkManager : MonoBehaviour
     }
     
     /// <summary>
-    /// Try to detect if ngrok tunnel is being used (basic heuristic)
+    /// Load a server URL saved by SaveServerUrlToConfig, if any
     /// </summary>
-    private string TryDetectNgrokUrl()
+    private string TryLoadSavedServerUrl()
     {
         // In a real implementation, you might check environment variables or config files
         // For now, we'll provide a way to manually set the production URL
@@ -251,7 +251,7 @@ public class NetworkManager : MonoBehaviour
         try
         {
             string configUrl = PlayerPrefs.GetString("ServerConfigUrl", "");
-            if (!string.IsNullOrEmpty(configUrl) && (configUrl.Contains("ngrok") || configUrl.StartsWith("http")))
+            if (!string.IsNullOrEmpty(configUrl) && configUrl.StartsWith("http"))
             {
                 if (enableDebugLogging)
                     Debug.Log($"🌐 WebGL: Loaded server URL from PlayerPrefs: {configUrl}");
@@ -271,7 +271,7 @@ public class NetworkManager : MonoBehaviour
             if (File.Exists(configPath))
             {
                 string configUrl = File.ReadAllText(configPath).Trim();
-                if (!string.IsNullOrEmpty(configUrl) && (configUrl.Contains("ngrok") || configUrl.StartsWith("http")))
+                if (!string.IsNullOrEmpty(configUrl) && configUrl.StartsWith("http"))
                 {
                     return configUrl;
                 }

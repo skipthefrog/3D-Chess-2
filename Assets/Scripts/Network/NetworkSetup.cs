@@ -56,14 +56,8 @@ public class NetworkSetup : MonoBehaviour
                 Debug.Log("🌐 NetworkSetup: Created NetworkManager instance");
         }
         
-        if (networkManager != null)
-        {
-            // Configure with production URL
-            networkManager.SetProductionUrl("https://928fb741c6db.ngrok-free.app");
-            
-            if (enableDebugLogging)
-                Debug.Log("🌐 NetworkSetup: NetworkManager configured with production URL");
-        }
+        // No production URL is set here: the old tunnel address is gone, and online play
+        // now goes through OnlineClient and the Cloudflare server
     }
     
     private void SetupServerUrlConfig()
@@ -80,14 +74,7 @@ public class NetworkSetup : MonoBehaviour
                 Debug.Log("🔧 NetworkSetup: Created ServerUrlConfig instance");
         }
         
-        if (serverConfig != null)
-        {
-            // Trigger URL setting
-            serverConfig.SetUrl("https://928fb741c6db.ngrok-free.app");
-            
-            if (enableDebugLogging)
-                Debug.Log("🔧 NetworkSetup: ServerUrlConfig configured with ngrok URL");
-        }
+        // ServerUrlConfig applies its own configured URL (if any) on Start
     }
     
     /// <summary>

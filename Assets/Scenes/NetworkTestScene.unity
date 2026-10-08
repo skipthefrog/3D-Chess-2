@@ -2914,8 +2914,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   serverUrl: http://localhost:3000
-  useProductionUrl: 1
-  productionUrl: https://928fb741c6db.ngrok-free.app
+  useProductionUrl: 0
+  productionUrl: 
   autoConnect: 0
   connectionTimeout: 10
   reconnectDelay: 5

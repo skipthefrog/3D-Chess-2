@@ -1,13 +1,15 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 /// <summary>
 /// Helper component to configure server URL at runtime
-/// Can be used to set ngrok URLs or other production endpoints
+/// for the legacy Socket.IO NetworkManager (online play now uses OnlineClient)
 /// </summary>
 public class ServerUrlConfig : MonoBehaviour
 {
     [Header("Server URL Configuration")]
-    [SerializeField] private string ngrokUrl = "https://928fb741c6db.ngrok-free.app";
+    [FormerlySerializedAs("serverUrl")]
+    [SerializeField] private string serverUrl = "";
     [SerializeField] private bool setOnStart = true;
     [SerializeField] private bool saveToConfig = true;
     
@@ -16,7 +18,7 @@ public class ServerUrlConfig : MonoBehaviour
     
     private void Start()
     {
-        if (setOnStart && !string.IsNullOrEmpty(ngrokUrl))
+        if (setOnStart && !string.IsNullOrEmpty(serverUrl))
         {
             SetServerUrl();
         }
@@ -28,7 +30,7 @@ public class ServerUrlConfig : MonoBehaviour
     [ContextMenu("Set Server URL")]
     public void SetServerUrl()
     {
-        if (string.IsNullOrEmpty(ngrokUrl))
+        if (string.IsNullOrEmpty(serverUrl))
         {
             Debug.LogWarning("⚠️ ServerUrlConfig: No URL specified");
             return;
@@ -42,7 +44,7 @@ public class ServerUrlConfig : MonoBehaviour
         }
         
         // Clean up the URL (ensure it starts with http/https)
-        string cleanUrl = CleanUrl(ngrokUrl);
+        string cleanUrl = CleanUrl(serverUrl);
         
         if (enableDebugLogging)
             Debug.Log($"🌐 ServerUrlConfig: Setting server URL to {cleanUrl}");
@@ -85,7 +87,7 @@ public class ServerUrlConfig : MonoBehaviour
     /// </summary>
     public void SetUrl(string url)
     {
-        ngrokUrl = url;
+        serverUrl = url;
         SetServerUrl();
     }
     
