@@ -115,6 +115,8 @@ public class GameEndDetectionManager : MonoBehaviour
     private void OnKingInCheckDetected(PieceColor kingColor)
     {
         if (!enableGameEndDetection) return;
+        // With 3+ players, checkmates are found after every move in OnTurnChanged, where we know who moved
+        if (IsMultiplayerInProgress()) return;
         
         // When a king is in check, immediately check for checkmate
         if (IsCheckmate(kingColor))
@@ -123,9 +125,35 @@ public class GameEndDetectionManager : MonoBehaviour
         }
     }
     
+    private bool IsMultiplayerInProgress() =>
+        PlayerManager.Instance != null && PlayerManager.Instance.GetActivePlayerCount() > 2;
+
     private void OnTurnChanged(PieceColor previousPlayer, PieceColor newCurrentPlayer)
     {
         if (!enableGameEndDetection) return;
+
+        // Multiplayer: the player who just moved may have checkmated ANY opponent, not just the
+        // next player. Credit the conquest to the mover. (Skipped when the "move" was just the
+        // turn passing over an eliminated player.)
+        if (IsMultiplayerInProgress() && !PlayerManager.Instance.IsPlayerEliminated(previousPlayer))
+        {
+            foreach (PieceColor player in PlayerManager.Instance.GetActivePlayers().ToList())
+            {
+                if (player == previousPlayer || PlayerManager.Instance.IsPlayerEliminated(player)) continue;
+                if (CheckDetectionManager.Instance != null && CheckDetectionManager.Instance.IsKingInCheck(player) && !HasLegalMoves(player))
+                {
+                    HandleCheckmate(player, previousPlayer);
+                    if (!enableGameEndDetection) return; // that was the final checkmate
+                }
+            }
+        }
+
+        // The player whose turn it now is was just conquered: pass the turn on
+        if (PlayerManager.Instance != null && PlayerManager.Instance.IsPlayerEliminated(newCurrentPlayer))
+        {
+            StartCoroutine(SkipEliminatedTurn());
+            return;
+        }
 
         // When a turn changes, check if the new current player has any legal moves
         if (!HasLegalMoves(newCurrentPlayer))
@@ -308,8 +336,21 @@ public class GameEndDetectionManager : MonoBehaviour
     /// </summary>
     /// <param name="checkmatedPlayer">The player who was checkmated</param>
     /// <param name="lastMover">The player who just moved (delivered checkmate). Optional - if not provided, will be determined from game state</param>
+    private System.Collections.IEnumerator SkipEliminatedTurn()
+    {
+        yield return null;
+        if (TurnManager.Instance != null && PlayerManager.Instance != null &&
+            PlayerManager.Instance.IsPlayerEliminated(TurnManager.Instance.GetCurrentPlayer()))
+        {
+            TurnManager.Instance.NextTurn();
+        }
+    }
+
     private void HandleCheckmate(PieceColor checkmatedPlayer, PieceColor? lastMover = null)
     {
+        // Already conquered (detected twice): nothing more to do
+        if (PlayerManager.Instance != null && PlayerManager.Instance.IsPlayerEliminated(checkmatedPlayer)) return;
+
         Debug.Log($"🏁 GameEndDetectionManager: CHECKMATE DETECTED for {checkmatedPlayer}, lastMover: {lastMover?.ToString() ?? "unknown"}");
 
         // Get active player count to determine if this triggers conquest or game end

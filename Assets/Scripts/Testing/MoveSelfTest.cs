@@ -60,6 +60,7 @@ public class MoveSelfTest : MonoBehaviour
             go.AddComponent<SphereCollider>();
             T piece = go.AddComponent<T>();
             piece.pieceColor = color;
+            piece.pieceType = PieceModels.TypeOf(piece);
             go.SetActive(true);
             made.Add(go);
             return piece;

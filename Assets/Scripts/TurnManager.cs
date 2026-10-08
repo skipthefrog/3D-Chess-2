@@ -303,8 +303,9 @@ public class TurnManager : MonoBehaviour
             Debug.Log($"⏰ TurnManager: Timer switched to {currentPlayer}");
         }
 
-        // If the new current player is AI, check for animations before triggering their move
-        if (IsCurrentPlayerAI())
+        // If the new current player is AI, check for animations before triggering their move.
+        // A player conquered this turn has no move to make; GameEndDetectionManager passes their turn on.
+        if (IsCurrentPlayerAI() && !(PlayerManager.Instance != null && PlayerManager.Instance.IsPlayerEliminated(currentPlayer)))
         {
             Debug.Log($"🔄 TurnManager: Current player {currentPlayer} is AI");
             Debug.Log($"🔍 TurnManager.NextTurn: Checking for animating pieces...");
@@ -361,8 +362,9 @@ public class TurnManager : MonoBehaviour
             Debug.Log($"⏰ TurnManager: Timer switched to {currentPlayer} (via SetCurrentPlayer)");
         }
         
-        // If the new current player is AI, check for animations before triggering their move
-        if (IsCurrentPlayerAI())
+        // If the new current player is AI, check for animations before triggering their move.
+        // A player conquered this turn has no move to make; GameEndDetectionManager passes their turn on.
+        if (IsCurrentPlayerAI() && !(PlayerManager.Instance != null && PlayerManager.Instance.IsPlayerEliminated(currentPlayer)))
         {
             Debug.Log($"TurnManager: Current player {currentPlayer} is AI");
             
