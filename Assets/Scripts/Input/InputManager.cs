@@ -901,7 +901,7 @@ public class InputManager : MonoBehaviour
                 if (template != null)
                 {
                     glowMaterial = new Material(template);
-                    glowMaterial.color = new Color(NeonTheme.Cyan.r, NeonTheme.Cyan.g, NeonTheme.Cyan.b, 0.22f);
+                    glowMaterial.color = new Color(NeonTheme.Cyan.r, NeonTheme.Cyan.g, NeonTheme.Cyan.b, 0.36f);
                     glowMaterial.SetFloat("_Glossiness", 0.85f);
                     glowMaterial.renderQueue = 3000;
                 }

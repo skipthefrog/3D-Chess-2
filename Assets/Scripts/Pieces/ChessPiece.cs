@@ -672,6 +672,9 @@ public abstract class ChessPiece : MonoBehaviour
         bubble.SetFloat("_Metallic", 0f);
         bubble.SetFloat("_Glossiness", 0.85f);
         bubble.renderQueue = renderQueue;
+        // A touch of glow in the bubble's color so it stands out against busy backdrops
+        bubble.EnableKeyword("_EMISSION");
+        bubble.SetColor("_EmissionColor", color * 0.35f);
         return bubble;
     }
 
@@ -728,7 +731,7 @@ public abstract class ChessPiece : MonoBehaviour
         }
 
         // Create glowing material with shader fallback
-        selectionGlow.GetComponent<Renderer>().material = BubbleMaterial(NeonTheme.Yellow, 0.16f, 3000);
+        selectionGlow.GetComponent<Renderer>().material = BubbleMaterial(NeonTheme.Yellow, 0.34f, 3000);
 
     }
     
@@ -771,7 +774,7 @@ public abstract class ChessPiece : MonoBehaviour
         }
 
         // Create glowing blue material with emission and shader fallback
-        capturableGlow.GetComponent<Renderer>().material = BubbleMaterial(NeonTheme.Cyan, 0.2f, 3000);
+        capturableGlow.GetComponent<Renderer>().material = BubbleMaterial(NeonTheme.Cyan, 0.36f, 3000);
 
         Debug.Log($"🔵 AddCapturableGlow: Created blue glow for {pieceColor} {pieceType} at {CurrentPosition}");
     }
@@ -821,6 +824,8 @@ public abstract class ChessPiece : MonoBehaviour
 
         // Add pulsing animation
         CheckIndicatorPulse pulseScript = checkIndicator.AddComponent<CheckIndicatorPulse>();
+        pulseScript.minAlpha = 0.22f;
+        pulseScript.maxAlpha = 0.45f;
 
         Debug.Log($"ChessPiece: Added check indicator to {pieceColor} king");
     }
