@@ -1,165 +1,45 @@
 using UnityEngine;
 
 /// <summary>
-/// UI component for pawn promotion piece selection
+/// Pawn promotion picker: a big neon panel with a picture of each piece the pawn can become.
+/// Piece pictures are rendered from the cyberpunk models (Art/Pieces/render_icons.py) into
+/// Resources/PieceIcons/<Light|Dark>_<Piece>.png.
 /// </summary>
 public class PawnPromotionUI : MonoBehaviour
 {
-    [Header("UI Settings")]
     public bool showPromotionUI = false;
-    public float buttonWidth = 100f;
-    public float buttonHeight = 100f; // Square buttons for piece visuals
-    public float spacing = 15f;
-    
-    [Header("Visual Settings")]
-    public bool useVisualPieces = true;
-    public float pieceIconSize = 80f;
-    
+
+    private static readonly ChessPieceType[] Choices = { ChessPieceType.Queen, ChessPieceType.Rook, ChessPieceType.Bishop, ChessPieceType.Knight };
+
     private System.Action<ChessPieceType> onPieceSelected;
     private PieceColor promotingPlayerColor;
-    private Rect backgroundRect;
-    private Rect queenButtonRect;
-    private Rect rookButtonRect;
-    private Rect bishopButtonRect;
-    private Rect knightButtonRect;
-    private Rect titleRect;
-    
-    private GUIStyle buttonStyle;
-    private GUIStyle titleStyle;
-    private GUIStyle backgroundStyle;
-    
-    // Piece preview textures
-    private Texture2D queenTexture;
-    private Texture2D rookTexture;
-    private Texture2D bishopTexture;
-    private Texture2D knightTexture;
-    
+    private readonly Texture2D[] icons = new Texture2D[4];
+
+#if DEVELOPMENT_BUILD
+    // Test hook: `defaults write BomSapo.Chess3D DebugShowPromotion -int 1` opens the picker on game start
     private void Start()
     {
-        SetupGUIStyles();
-        CalculateRects();
+        if (PlayerPrefs.GetInt("DebugShowPromotion", 0) == 1)
+            ShowPromotionSelection(PlayerPrefs.GetInt("DebugPromotionDark", 0) == 1 ? PieceColor.Black : PieceColor.White, t => Debug.Log($"Debug promotion picked {t}"));
     }
-    
-    private void SetupGUIStyles()
-    {
-        // Button style - optimized for visual pieces
-        buttonStyle = new GUIStyle();
-        buttonStyle.fontSize = 12; // Smaller text for labels under pieces
-        buttonStyle.fontStyle = FontStyle.Bold;
-        buttonStyle.alignment = TextAnchor.LowerCenter;
-        buttonStyle.normal.textColor = Color.white;
-        buttonStyle.normal.background = CreateColorTexture(new Color(0.2f, 0.4f, 0.6f, 0.8f));
-        buttonStyle.hover.background = CreateColorTexture(new Color(0.3f, 0.5f, 0.7f, 0.9f));
-        buttonStyle.active.background = CreateColorTexture(new Color(0.4f, 0.6f, 0.8f, 1f));
-        buttonStyle.border = new RectOffset(4, 4, 4, 4);
-        buttonStyle.padding = new RectOffset(4, 4, 4, 4);
-        
-        // Title style
-        titleStyle = new GUIStyle();
-        titleStyle.fontSize = Mathf.RoundToInt(Screen.height * 0.025f); // Responsive font size
-        titleStyle.fontStyle = FontStyle.Bold;
-        titleStyle.alignment = TextAnchor.MiddleCenter;
-        titleStyle.normal.textColor = Color.white;
-        
-        // Background style
-        backgroundStyle = new GUIStyle();
-        backgroundStyle.normal.background = CreateColorTexture(new Color(0f, 0f, 0f, 0.8f));
-    }
-    
-    private Texture2D CreateColorTexture(Color color)
-    {
-        Texture2D texture = new Texture2D(1, 1);
-        texture.SetPixel(0, 0, color);
-        texture.Apply();
-        return texture;
-    }
-    
-    private void CalculateRects()
-    {
-        float screenWidth = Screen.width;
-        float screenHeight = Screen.height;
-        
-        // Calculate total width needed for 4 buttons with spacing
-        float totalWidth = (buttonWidth * 4) + (spacing * 3);
-        float startX = (screenWidth - totalWidth) / 2f;
-        float centerY = screenHeight / 2f;
-        
-        // Background covers the entire selection area with more padding
-        float backgroundWidth = totalWidth + (spacing * 4);
-        float backgroundHeight = buttonHeight + 120f; // More space to prevent overlap
-        backgroundRect = new Rect(
-            (screenWidth - backgroundWidth) / 2f,
-            centerY - (backgroundHeight / 2f),
-            backgroundWidth,
-            backgroundHeight
-        );
-        
-        // Title positioned higher to avoid button overlap
-        titleRect = new Rect(
-            (screenWidth - totalWidth) / 2f,
-            centerY - 70f, // Moved up from -50f
-            totalWidth,
-            25f
-        );
-        
-        // Button positions
-        float buttonY = centerY - (buttonHeight / 2f);
-        queenButtonRect = new Rect(startX, buttonY, buttonWidth, buttonHeight);
-        rookButtonRect = new Rect(startX + buttonWidth + spacing, buttonY, buttonWidth, buttonHeight);
-        bishopButtonRect = new Rect(startX + (buttonWidth + spacing) * 2, buttonY, buttonWidth, buttonHeight);
-        knightButtonRect = new Rect(startX + (buttonWidth + spacing) * 3, buttonY, buttonWidth, buttonHeight);
-    }
-    
+#endif
+
     /// <summary>
     /// Show the promotion selection UI
     /// </summary>
     public void ShowPromotionSelection(PieceColor playerColor, System.Action<ChessPieceType> onSelection)
     {
-        Debug.Log($"PawnPromotionUI.ShowPromotionSelection: ENTRY - playerColor={playerColor}");
-        Debug.Log($"PawnPromotionUI.ShowPromotionSelection: onSelection callback is {(onSelection != null ? "NOT NULL" : "NULL")}");
-        
         showPromotionUI = true;
         promotingPlayerColor = playerColor;
         onPieceSelected = onSelection;
-        
-        // Load piece preview textures if using visual pieces
-        if (useVisualPieces)
+
+        string team = playerColor == PieceColor.White ? "Light" : "Dark";
+        for (int i = 0; i < Choices.Length; i++)
         {
-            LoadPiecePreviewTextures();
-        }
-        
-        Debug.Log($"PawnPromotionUI.ShowPromotionSelection: Stored callback, onPieceSelected is now {(onPieceSelected != null ? "NOT NULL" : "NULL")}");
-        Debug.Log($"PawnPromotionUI.ShowPromotionSelection: showPromotionUI={showPromotionUI}, promotingPlayerColor={promotingPlayerColor}");
-    }
-    
-    /// <summary>
-    /// Load piece preview textures for visual buttons
-    /// </summary>
-    private void LoadPiecePreviewTextures()
-    {
-        if (PiecePreviewRenderer.Instance == null)
-        {
-            Debug.LogWarning("PawnPromotionUI: PiecePreviewRenderer not available, falling back to text buttons");
-            useVisualPieces = false;
-            return;
-        }
-        
-        try
-        {
-            queenTexture = PiecePreviewRenderer.Instance.GetCachedPiecePreview(ChessPieceType.Queen, promotingPlayerColor);
-            rookTexture = PiecePreviewRenderer.Instance.GetCachedPiecePreview(ChessPieceType.Rook, promotingPlayerColor);
-            bishopTexture = PiecePreviewRenderer.Instance.GetCachedPiecePreview(ChessPieceType.Bishop, promotingPlayerColor);
-            knightTexture = PiecePreviewRenderer.Instance.GetCachedPiecePreview(ChessPieceType.Knight, promotingPlayerColor);
-            
-            Debug.Log("PawnPromotionUI: Piece preview textures loaded successfully");
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError($"PawnPromotionUI: Failed to load piece textures: {e.Message}");
-            useVisualPieces = false;
+            icons[i] = Resources.Load<Texture2D>($"PieceIcons/{team}_{Choices[i]}");
         }
     }
-    
+
     /// <summary>
     /// Hide the promotion selection UI
     /// </summary>
@@ -167,76 +47,59 @@ public class PawnPromotionUI : MonoBehaviour
     {
         showPromotionUI = false;
         onPieceSelected = null;
-        
-        Debug.Log("PawnPromotionUI: Hiding promotion selection");
     }
-    
+
     private void OnGUI()
     {
         if (!showPromotionUI) return;
-        
-        // Ensure styles are set up
-        if (buttonStyle == null)
+        GUI.depth = -20;
+        Vector2 ui = TouchGUI.Begin();
+
+        // Dim the board and swallow taps on it while choosing
+        Rect full = new Rect(-200f, -200f, ui.x + 400f, ui.y + 400f);
+        GUI.DrawTexture(full, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, new Color(0.04f, 0f, 0.1f, 0.65f), 0, 0);
+        TouchGUI.Block(full);
+
+        Color accent = promotingPlayerColor == PieceColor.White ? NeonTheme.Cyan : NeonTheme.Pink;
+
+        // Four big cards, sized to fill most of the screen
+        const float gap = 16f;
+        const float pad = 26f;
+        float cardW = Mathf.Clamp((ui.x - 80f - pad * 2f - gap * 3f) / 4f, 110f, 170f);
+        float iconSize = cardW - 16f;
+        float cardH = Mathf.Min(iconSize + 46f, ui.y - 150f);
+        iconSize = Mathf.Min(iconSize, cardH - 46f);
+        float panelW = cardW * 4f + gap * 3f + pad * 2f;
+        float panelH = cardH + 112f;
+        Rect panel = new Rect((ui.x - panelW) / 2f, (ui.y - panelH) / 2f, panelW, panelH);
+        NeonTheme.GUIPanel(panel, accent, 0.96f);
+
+        GUI.Label(new Rect(panel.x, panel.y + 14f, panel.width, 40f), "PROMOTE YOUR PAWN!",
+            NeonTheme.GUILabelStyle(NeonTheme.Lime, 28, true, TextAnchor.MiddleCenter, display: true));
+        GUI.Label(new Rect(panel.x, panel.y + 54f, panel.width, 26f), "Tap the piece it becomes",
+            NeonTheme.GUILabelStyle(NeonTheme.Lavender, 17, true, TextAnchor.MiddleCenter));
+
+        for (int i = 0; i < Choices.Length; i++)
         {
-            SetupGUIStyles();
-            CalculateRects();
-        }
-        
-        // Draw semi-transparent background
-        GUI.Box(backgroundRect, "", backgroundStyle);
-        
-        // Draw title
-        string titleText = $"{promotingPlayerColor} Pawn Promotion";
-        GUI.Label(titleRect, titleText, titleStyle);
-        
-        // Draw piece selection buttons
-        if (useVisualPieces && queenTexture != null)
-        {
-            DrawVisualPieceButton(queenButtonRect, queenTexture, "QUEEN", ChessPieceType.Queen);
-            DrawVisualPieceButton(rookButtonRect, rookTexture, "ROOK", ChessPieceType.Rook);
-            DrawVisualPieceButton(bishopButtonRect, bishopTexture, "BISHOP", ChessPieceType.Bishop);
-            DrawVisualPieceButton(knightButtonRect, knightTexture, "KNIGHT", ChessPieceType.Knight);
-        }
-        else
-        {
-            // Fallback to text buttons
-            if (GUI.Button(queenButtonRect, "QUEEN", buttonStyle))
+            Rect card = new Rect(panel.x + pad + i * (cardW + gap), panel.y + 92f, cardW, cardH);
+            bool tapped = TouchGUI.NeonButton(card, "", i == 0 ? NeonTheme.Lime : accent, NeonTheme.Ground, outlined: true);
+
+            Rect iconRect = new Rect(card.x + (cardW - iconSize) / 2f, card.y + 4f, iconSize, iconSize);
+            if (icons[i] != null) GUI.DrawTexture(iconRect, icons[i], ScaleMode.ScaleToFit, true);
+
+            GUI.Label(new Rect(card.x, card.yMax - 40f, card.width, 34f), Choices[i].ToString().ToUpperInvariant(),
+                NeonTheme.GUILabelStyle(i == 0 ? NeonTheme.Lime : accent, 17, true, TextAnchor.MiddleCenter, display: true));
+
+            if (tapped)
             {
-                OnPieceButtonClicked(ChessPieceType.Queen);
-            }
-            
-            if (GUI.Button(rookButtonRect, "ROOK", buttonStyle))
-            {
-                OnPieceButtonClicked(ChessPieceType.Rook);
-            }
-            
-            if (GUI.Button(bishopButtonRect, "BISHOP", buttonStyle))
-            {
-                OnPieceButtonClicked(ChessPieceType.Bishop);
-            }
-            
-            if (GUI.Button(knightButtonRect, "KNIGHT", buttonStyle))
-            {
-                OnPieceButtonClicked(ChessPieceType.Knight);
+                TouchGUI.End();
+                OnPieceButtonClicked(Choices[i]);
+                return;
             }
         }
-        
-        // Draw instructions positioned below title but above buttons
-        Rect instructionsRect = new Rect(
-            titleRect.x,
-            titleRect.y + 30f, // Closer to title
-            titleRect.width,
-            20f
-        );
-        
-        // Create smaller style for instructions
-        GUIStyle instructionStyle = new GUIStyle(titleStyle);
-        instructionStyle.fontSize = Mathf.RoundToInt(titleStyle.fontSize * 0.7f);
-        instructionStyle.normal.textColor = new Color(0.9f, 0.9f, 0.9f, 1f); // Slightly dimmer
-        
-        GUI.Label(instructionsRect, "Choose your new piece:", instructionStyle);
+        TouchGUI.End();
     }
-    
+
     private void OnPieceButtonClicked(ChessPieceType pieceType)
     {
         Debug.Log($"PawnPromotionUI.OnPieceButtonClicked: ENTRY - Player selected {pieceType}");
@@ -307,47 +170,5 @@ public class PawnPromotionUI : MonoBehaviour
         }
         
         Debug.Log($"PawnPromotionUI.OnPieceButtonClicked: EXIT");
-    }
-    
-    /// <summary>
-    /// Draw a visual piece button with texture and label
-    /// </summary>
-    private void DrawVisualPieceButton(Rect buttonRect, Texture2D pieceTexture, string label, ChessPieceType pieceType)
-    {
-        // Create button background
-        if (GUI.Button(buttonRect, "", buttonStyle))
-        {
-            OnPieceButtonClicked(pieceType);
-            return;
-        }
-        
-        // Draw piece texture in the center of the button
-        if (pieceTexture != null)
-        {
-            float iconMargin = (buttonWidth - pieceIconSize) / 2f;
-            Rect iconRect = new Rect(
-                buttonRect.x + iconMargin,
-                buttonRect.y + iconMargin - 10f, // Slightly higher to leave room for label
-                pieceIconSize,
-                pieceIconSize - 20f // Make room for text at bottom
-            );
-            
-            GUI.DrawTexture(iconRect, pieceTexture, ScaleMode.ScaleToFit, true);
-        }
-        
-        // Draw piece label at bottom of button
-        Rect labelRect = new Rect(
-            buttonRect.x + 2f,
-            buttonRect.y + buttonRect.height - 20f,
-            buttonRect.width - 4f,
-            18f
-        );
-        
-        GUIStyle labelStyle = new GUIStyle(buttonStyle);
-        labelStyle.alignment = TextAnchor.MiddleCenter;
-        labelStyle.fontSize = 10;
-        labelStyle.normal.textColor = Color.white;
-        
-        GUI.Label(labelRect, label, labelStyle);
     }
 }
