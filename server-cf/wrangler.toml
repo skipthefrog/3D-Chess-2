@@ -12,9 +12,25 @@ class_name = "Room"
 name = "MATCHMAKER"
 class_name = "Matchmaker"
 
+# Accounts = every player: unique names, sign-in links, friends
+[[durable_objects.bindings]]
+name = "ACCOUNTS"
+class_name = "Accounts"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room", "Matchmaker"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Accounts"]
+
+[vars]
+# Sign-in tokens are accepted only when issued for these apps (comma-separated).
+# Apple: the iOS bundle id, plus the web Services ID once there is a web build.
+APPLE_AUDIENCES = "BomSapo.Chess3D"
+# Google: OAuth client ids; empty means Sign in with Google is off.
+GOOGLE_CLIENT_IDS = ""
 
 # TOKEN_SECRET is a secret: set it with `npx wrangler secret put TOKEN_SECRET`.
 # For local development it comes from .dev.vars (not committed).

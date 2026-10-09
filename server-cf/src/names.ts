@@ -1,6 +1,6 @@
 // Player names are generated, never typed, so there is nothing offensive to moderate.
-// A name is an adjective + a noun + a number from 1 to 99, e.g. "NeonRook42".
-// Keep these lists in sync with Assets/Scripts/Network/Online/PlayerNames.cs.
+// A name is an adjective + a noun + a number from 1 to 999, e.g. "NeonRook42" (about 1 million names).
+// Names are handed out by the Accounts object, which keeps each one unique.
 
 export const ADJECTIVES = [
   'Neon', 'Turbo', 'Glitchy', 'Cosmic', 'Pixel', 'Laser', 'Hyper', 'Chrome',
@@ -18,11 +18,14 @@ export const NOUNS = [
 
 export function randomName(): string {
   const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
-  return `${pick(ADJECTIVES)}${pick(NOUNS)}${1 + Math.floor(Math.random() * 99)}`;
+  const adjective = pick(ADJECTIVES);
+  let noun = pick(NOUNS);
+  while (noun === adjective) noun = pick(NOUNS); // both lists have "Rocket"
+  return `${adjective}${noun}${1 + Math.floor(Math.random() * 999)}`;
 }
 
 /** True only for names the generator could have made */
 export function isGeneratedName(name: string): boolean {
-  const m = /^([A-Z][a-z]+)([A-Z][a-z]+)([1-9][0-9]?)$/.exec(name);
+  const m = /^([A-Z][a-z]+)([A-Z][a-z]+)([1-9][0-9]{0,2})$/.exec(name);
   return !!m && ADJECTIVES.includes(m[1]) && NOUNS.includes(m[2]);
 }

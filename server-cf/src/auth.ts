@@ -1,8 +1,7 @@
-import { isGeneratedName, randomName } from './names.js';
 // ─────────────────────────────────────────────────────────────────────────────
-// Guest tokens: base64url(JSON payload) + "." + base64url(HMAC-SHA256 signature).
-// No accounts yet; a token just gives a player a stable id so they can reconnect
-// to their seat. Signed with the TOKEN_SECRET secret.
+// Tokens: base64url(JSON payload) + "." + base64url(HMAC-SHA256 signature), signed with
+// the TOKEN_SECRET secret. A token names an account (see accounts.ts) and its current name.
+// The app refreshes its token each time it signs in.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface TokenPayload {
@@ -30,8 +29,8 @@ async function key(secret: string): Promise<CryptoKey> {
   );
 }
 
-export async function issueToken(secret: string, name: string): Promise<{ token: string; payload: TokenPayload }> {
-  const payload: TokenPayload = { userId: crypto.randomUUID(), name, iat: Date.now() };
+export async function issueToken(secret: string, userId: string, name: string): Promise<{ token: string; payload: TokenPayload }> {
+  const payload: TokenPayload = { userId, name, iat: Date.now() };
   const body = b64url(new TextEncoder().encode(JSON.stringify(payload)));
   const sig = new Uint8Array(await crypto.subtle.sign('HMAC', await key(secret), new TextEncoder().encode(body)));
   return { token: `${body}.${b64url(sig)}`, payload };
@@ -50,11 +49,4 @@ export async function verifyToken(secret: string, token: string | null): Promise
   } catch {
     return null;
   }
-}
-
-/** Display names: trimmed, printable, 1–20 characters */
-/** Only generated names are accepted (see names.ts); anything else gets a fresh generated name */
-export function cleanName(raw: unknown): string {
-  const name = typeof raw === 'string' ? raw.trim() : '';
-  return isGeneratedName(name) ? name : randomName();
 }

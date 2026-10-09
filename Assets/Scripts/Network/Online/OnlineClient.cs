@@ -76,57 +76,218 @@ public class OnlineClient : MonoBehaviour
         if (matchSocket != null) await matchSocket.Close();
     }
 
-    // ───────────────────────── Sign-in ─────────────────────────
+    // ───────────────────────── Account ─────────────────────────
 
-    /// <summary>Get (or reuse) a guest token. The same token rejoins the same seat.</summary>
-    public IEnumerator EnsureSignedIn(string name, Action<bool, string> done)
+    private bool refreshedThisSession;
+
+    /// <summary>True when this device's account is linked to Sign in with Apple</summary>
+    public bool SignedInWithApple => PlayerPrefs.GetInt("OnlineAppleLinked", 0) == 1;
+
+    /// <summary>
+    /// Make sure this device has an account and a fresh token. Reuses the saved account
+    /// (refreshing its token and name once per session), or creates a guest account.
+    /// </summary>
+    public IEnumerator EnsureSignedIn(Action<bool, string> done)
     {
-        string token = PlayerPrefs.GetString("OnlineToken", "");
-        // A token only works on the server that issued it (local test server vs live)
-        bool sameServer = PlayerPrefs.GetString("OnlineTokenServer", "") == ServerUrl;
-        if (!string.IsNullOrEmpty(token) && PlayerName == name && sameServer)
+        string token = Token;
+        bool sameServer = PlayerPrefs.GetString("OnlineTokenServer", "") == ServerUrl; // local test server vs live
+        if (!string.IsNullOrEmpty(token) && sameServer)
         {
-            done(true, null);
-            yield break;
+            if (refreshedThisSession) { done(true, null); yield break; }
+            bool expired = false;
+            string error = null;
+            yield return Call("POST", "/auth/refresh", "{}", token, (status, text) =>
+            {
+                if (status == 200) SaveAuth(text);
+                else if (status == 401) expired = true;
+                else error = ErrorText(status, text);
+            });
+            if (error != null) { done(false, error); yield break; }
+            if (!expired) { refreshedThisSession = true; done(true, null); yield break; }
         }
 
-        string body = JsonUtility.ToJson(new NameBody { name = name });
-        using (var request = Post("/auth/guest", body, null))
+        string guestError = null;
+        yield return Call("POST", "/auth/guest", "{}", null, (status, text) =>
         {
-            yield return request.SendWebRequest();
-            if (request.result != UnityWebRequest.Result.Success)
-            {
-                done(false, FriendlyError(request));
-                yield break;
-            }
-            var auth = JsonUtility.FromJson<AuthResponse>(request.downloadHandler.text);
-            PlayerPrefs.SetString("OnlineToken", auth.token);
-            PlayerPrefs.SetString("OnlineName", auth.name);
-            PlayerNames.Current = auth.name; // the server's copy wins if they ever differ
-            PlayerPrefs.SetString("OnlineTokenServer", ServerUrl);
+            if (status == 200) { SaveAuth(text); PlayerPrefs.SetInt("OnlineAppleLinked", 0); }
+            else guestError = ErrorText(status, text);
+        });
+        refreshedThisSession = guestError == null;
+        done(guestError == null, guestError);
+    }
+
+    /// <summary>Swap this player's name for a new unique one</summary>
+    public IEnumerator RerollName(Action<string, string> done)
+    {
+        string name = null, error = null;
+        yield return Call("POST", "/names/reroll", "{}", Token, (status, text) =>
+        {
+            if (status == 200) name = SaveAuth(text).name;
+            else error = ErrorText(status, text);
+        });
+        done(name, error);
+    }
+
+    /// <summary>
+    /// Link this account to Sign in with Apple, or, if that Apple ID already has an account
+    /// (e.g. after a reinstall), switch to it. Calls back with (restored, error).
+    /// </summary>
+    public IEnumerator LinkApple(string identityToken, Action<bool, string> done)
+    {
+        bool restored = false;
+        string error = null;
+        string body = JsonUtility.ToJson(new IdTokenBody { idToken = identityToken });
+        yield return Call("POST", "/auth/apple", body, Token, (status, text) =>
+        {
+            if (status != 200) { error = ErrorText(status, text); return; }
+            restored = SaveAuth(text).restored;
+            PlayerPrefs.SetInt("OnlineAppleLinked", 1);
             PlayerPrefs.Save();
-            done(true, null);
+        });
+        done(restored, error);
+    }
+
+    /// <summary>A code to type on another device to use this account there</summary>
+    public IEnumerator CreateLinkCode(Action<string, string> done)
+    {
+        string code = null, error = null;
+        yield return Call("POST", "/link/code", "{}", Token, (status, text) =>
+        {
+            if (status == 200) code = JsonUtility.FromJson<LinkCodeResponse>(text).code;
+            else error = ErrorText(status, text);
+        });
+        done(code, error);
+    }
+
+    /// <summary>Become the account that showed this code on another device</summary>
+    public IEnumerator RedeemLinkCode(string code, Action<string> done)
+    {
+        string error = null;
+        string body = "{\"code\":\"" + code.Trim().ToUpperInvariant() + "\"}";
+        yield return Call("POST", "/link/redeem", body, null, (status, text) =>
+        {
+            if (status == 200) { SaveAuth(text); PlayerPrefs.SetInt("OnlineAppleLinked", 0); refreshedThisSession = false; }
+            else error = ErrorText(status, text);
+        });
+        done(error);
+    }
+
+    // ───────────────────────── Friends ─────────────────────────
+
+    public IEnumerator GetFriends(Action<FriendsResponse, string> done)
+    {
+        FriendsResponse result = null;
+        string error = null;
+        yield return Call("GET", "/friends", null, Token, (status, text) =>
+        {
+            if (status == 200) result = JsonUtility.FromJson<FriendsResponse>(text);
+            else error = ErrorText(status, text);
+        });
+        done(result, error);
+    }
+
+    public IEnumerator SendFriendRequest(string name, Action<string, string> done)
+    {
+        string result = null, error = null;
+        string body = JsonUtility.ToJson(new NameBody { name = name.Trim() });
+        yield return Call("POST", "/friends/request", body, Token, (status, text) =>
+        {
+            if (status == 200) result = JsonUtility.FromJson<FriendStatusResponse>(text).status;
+            else error = ErrorText(status, text);
+        });
+        done(result, error);
+    }
+
+    public IEnumerator RespondToFriend(string friendId, bool accept, Action<string> done) =>
+        Simple("/friends/respond", "{\"friendId\":\"" + friendId + "\",\"accept\":" + (accept ? "true" : "false") + "}", done);
+
+    public IEnumerator RemoveFriend(string friendId, Action<string> done) =>
+        Simple("/friends/remove", "{\"friendId\":\"" + friendId + "\"}", done);
+
+    public IEnumerator BlockPlayer(string friendId, Action<string> done) =>
+        Simple("/friends/block", "{\"friendId\":\"" + friendId + "\"}", done);
+
+    public IEnumerator DismissChallenge(string roomCode, Action<string> done) =>
+        Simple("/friends/dismiss", "{\"roomCode\":\"" + roomCode + "\"}", done);
+
+    /// <summary>Create a private game and invite a friend to it. Calls back with (roomCode, error).</summary>
+    public IEnumerator ChallengeFriend(string friendId, string boardSize, Action<string, string> done)
+    {
+        string code = null, error = null;
+        string body = "{\"friendId\":\"" + friendId + "\",\"config\":{\"boardSize\":\"" + boardSize + "\",\"playerCount\":2,\"chaosMode\":false,\"timedMode\":false}}";
+        yield return Call("POST", "/friends/challenge", body, Token, (status, text) =>
+        {
+            if (status == 200) code = JsonUtility.FromJson<CreateRoomResponse>(text).code;
+            else error = ErrorText(status, text);
+        });
+        done(code, error);
+    }
+
+    private IEnumerator Simple(string path, string body, Action<string> done)
+    {
+        string error = null;
+        yield return Call("POST", path, body, Token, (status, text) =>
+        {
+            if (status != 200) error = ErrorText(status, text);
+        });
+        done(error);
+    }
+
+    // ───────────────────────── HTTP ─────────────────────────
+
+    private string Token => PlayerPrefs.GetString("OnlineToken", "");
+
+    /// <summary>Send a request; calls back with (HTTP status, body). Status 0 = couldn't reach the server.</summary>
+    private IEnumerator Call(string method, string path, string json, string token, Action<long, string> done)
+    {
+        using (var request = new UnityWebRequest(ServerUrl + path, method))
+        {
+            if (json != null) request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            if (!string.IsNullOrEmpty(token)) request.SetRequestHeader("Authorization", "Bearer " + token);
+            request.timeout = 15;
+            yield return request.SendWebRequest();
+            long status = request.result == UnityWebRequest.Result.ConnectionError ? 0 : request.responseCode;
+            done(status, request.downloadHandler.text);
         }
     }
 
-    private string Token => PlayerPrefs.GetString("OnlineToken", "");
+    private AuthResponse SaveAuth(string text)
+    {
+        var auth = JsonUtility.FromJson<AuthResponse>(text);
+        PlayerPrefs.SetString("OnlineToken", auth.token);
+        PlayerPrefs.SetString("OnlineName", auth.name);
+        PlayerPrefs.SetString("OnlineUserId", auth.userId);
+        PlayerPrefs.SetString("OnlineTokenServer", ServerUrl);
+        PlayerPrefs.Save();
+        return auth;
+    }
+
+    private static string ErrorText(long status, string text)
+    {
+        if (status == 0) return "Couldn't reach the game server";
+        try
+        {
+            var e = JsonUtility.FromJson<ErrorResponse>(text);
+            if (!string.IsNullOrEmpty(e.error)) return e.error;
+        }
+        catch { /* not JSON */ }
+        return $"Server error ({status})";
+    }
 
     // ───────────────────────── Rooms ─────────────────────────
 
     public IEnumerator CreateRoom(string boardSize, Action<string, string> done)
     {
+        string code = null, error = null;
         string body = "{\"config\":{\"boardSize\":\"" + boardSize + "\",\"playerCount\":2,\"chaosMode\":false,\"timedMode\":false}}";
-        using (var request = Post("/rooms", body, Token))
+        yield return Call("POST", "/rooms", body, Token, (status, text) =>
         {
-            yield return request.SendWebRequest();
-            if (request.result != UnityWebRequest.Result.Success)
-            {
-                done(null, FriendlyError(request));
-                yield break;
-            }
-            var room = JsonUtility.FromJson<CreateRoomResponse>(request.downloadHandler.text);
-            done(room.code, null);
-        }
+            if (status == 200) code = JsonUtility.FromJson<CreateRoomResponse>(text).code;
+            else error = ErrorText(status, text);
+        });
+        done(code, error);
     }
 
     /// <summary>Open the room's WebSocket. room:joined arrives through OnMessage.</summary>
@@ -253,33 +414,39 @@ public class OnlineClient : MonoBehaviour
 
     // ───────────────────────── Helpers ─────────────────────────
 
-    private UnityWebRequest Post(string path, string json, string token)
-    {
-        var request = new UnityWebRequest(ServerUrl + path, "POST");
-        request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
-        request.downloadHandler = new DownloadHandlerBuffer();
-        request.SetRequestHeader("Content-Type", "application/json");
-        if (!string.IsNullOrEmpty(token)) request.SetRequestHeader("Authorization", "Bearer " + token);
-        request.timeout = 15;
-        return request;
-    }
-
-    private static string FriendlyError(UnityWebRequest request)
-    {
-        if (request.result == UnityWebRequest.Result.ConnectionError) return "Couldn't reach the game server";
-        if (request.responseCode == 401)
-        {
-            PlayerPrefs.DeleteKey("OnlineToken");
-            return "Sign-in expired, try again";
-        }
-        return $"Server error ({request.responseCode})";
-    }
-
     private static string Pos(BoardPosition p) => "{\"x\":" + p.x + ",\"y\":" + p.y + ",\"z\":" + p.z + "}";
 
     [Serializable] private class NameBody { public string name; }
-    [Serializable] private class AuthResponse { public string token; public string userId; public string name; }
+    [Serializable] private class IdTokenBody { public string idToken; }
+    [Serializable] private class AuthResponse { public string token; public string userId; public string name; public bool restored; }
     [Serializable] private class CreateRoomResponse { public string code; }
+    [Serializable] private class LinkCodeResponse { public string code; }
+    [Serializable] private class FriendStatusResponse { public string status; }
+    [Serializable] private class ErrorResponse { public string error; }
+}
+
+[Serializable]
+public class FriendsResponse
+{
+    public FriendInfo[] friends;
+    public ChallengeInfo[] challenges;
+}
+
+[Serializable]
+public class FriendInfo
+{
+    public string userId;
+    public string name;
+    public string status;   // friends | incoming | outgoing
+    public bool online;
+}
+
+[Serializable]
+public class ChallengeInfo
+{
+    public string fromUserId;
+    public string fromName;
+    public string roomCode;
 }
 
 /// <summary>Everything the server sends, flattened. Fields a message doesn't use stay empty.</summary>

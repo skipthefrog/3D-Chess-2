@@ -1,14 +1,32 @@
-import { cleanName, issueToken, verifyToken } from './auth.js';
+import { issueToken, verifyToken } from './auth.js';
+import { verifyIdToken, type Provider } from './oidc.js';
 import type { GameConfig } from './types/game.js';
 
 export { Room } from './room.js';
 export { Matchmaker } from './matchmaker.js';
+export { Accounts } from './accounts.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3D Chess game server (Cloudflare Worker)
 //
 //   GET  /health                        → { ok: true }
-//   POST /auth/guest   { name }         → { token, userId, name }
+//
+//   Accounts (see accounts.ts). Calls that sign you in return { token, userId, name }.
+//   POST /auth/guest                    → new account with a unique generated name
+//   POST /auth/refresh                  → fresh token + current name   (Bearer)
+//   POST /auth/apple   { idToken }      → sign in with Apple; links to the current
+//   POST /auth/google  { idToken }        account (Bearer optional) or restores yours
+//   POST /names/reroll                  → a new unique name            (Bearer)
+//   GET  /me                            → { userId, name, providers }  (Bearer)
+//   POST /link/code                     → { code } to type on another device (Bearer)
+//   POST /link/redeem  { code }         → become that account on this device
+//   GET  /friends                       → { friends, challenges }; marks you online (Bearer)
+//   POST /friends/request { name }      POST /friends/respond { friendId, accept }
+//   POST /friends/remove  { friendId }  POST /friends/block   { friendId }
+//   POST /friends/challenge { friendId, config? } → { code } private room for you two
+//   POST /friends/dismiss { roomCode }
+//
+//   Games
 //   POST /rooms        { config, isPublic? }   (Authorization: Bearer <token>)
 //                                       → { code, config }
 //   GET  /rooms/:code                   → room summary (players, open seats)
@@ -22,7 +40,17 @@ export { Matchmaker } from './matchmaker.js';
 export interface Env {
   ROOM: DurableObjectNamespace;
   MATCHMAKER: DurableObjectNamespace;
+  ACCOUNTS: DurableObjectNamespace;
   TOKEN_SECRET: string;
+  APPLE_AUDIENCES: string;
+  GOOGLE_CLIENT_IDS: string;
+}
+
+/** Call the Accounts object; returns its JSON and HTTP status */
+async function accounts(env: Env, op: string, body: Record<string, unknown>): Promise<{ status: number; data: Record<string, unknown> }> {
+  const stub = env.ACCOUNTS.get(env.ACCOUNTS.idFromName('global'));
+  const res = await stub.fetch(`https://accounts/${op}`, { method: 'POST', body: JSON.stringify(body) });
+  return { status: res.status, data: await res.json() as Record<string, unknown> };
 }
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O or 1/I
@@ -65,19 +93,65 @@ export default {
 
     if (path === '/health' || path === '') return json({ ok: true, service: '3d-chess' });
 
-    if (path === '/auth/guest' && request.method === 'POST') {
-      const body = await request.json().catch(() => ({})) as { name?: unknown };
-      const { token, payload } = await issueToken(env.TOKEN_SECRET, cleanName(body.name));
-      return json({ token, userId: payload.userId, name: payload.name });
-    }
-
     const bearer = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? null;
     const user = await verifyToken(env.TOKEN_SECRET, bearer ?? url.searchParams.get('token'));
+    const body = request.method === 'POST' ? await request.json().catch(() => ({})) as Record<string, unknown> : {};
+
+    // Run an Accounts call; when it identifies an account, hand back a fresh token for it
+    const account = async (op: string, extra: Record<string, unknown> = {}, signsIn = false): Promise<Response> => {
+      const { status, data } = await accounts(env, op, { ...extra, userId: user?.userId });
+      if (status !== 200 || !signsIn) return json(data, status);
+      const { token } = await issueToken(env.TOKEN_SECRET, data.userId as string, data.name as string);
+      return json({ ...data, token });
+    };
+    const needUser = () => json({ error: 'Sign in first' }, 401);
+
+    if (request.method === 'POST' && path === '/auth/guest') {
+      const { status, data } = await accounts(env, 'guest', {});
+      if (status !== 200) return json(data, status);
+      const { token } = await issueToken(env.TOKEN_SECRET, data.userId as string, data.name as string);
+      return json({ ...data, token });
+    }
+    if (request.method === 'POST' && path === '/auth/refresh') return user ? account('refresh', { name: user.name }, true) : needUser();
+    if (request.method === 'POST' && (path === '/auth/apple' || path === '/auth/google')) {
+      const provider: Provider = path.endsWith('apple') ? 'apple' : 'google';
+      const audiences = (provider === 'apple' ? env.APPLE_AUDIENCES : env.GOOGLE_CLIENT_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+      if (audiences.length === 0) return json({ error: `Sign in with ${provider} isn't set up yet` }, 501);
+      const subject = typeof body.idToken === 'string' ? await verifyIdToken(provider, body.idToken, audiences) : null;
+      if (!subject) return json({ error: 'Sign-in failed, please try again' }, 401);
+      return account('login', { provider, subject }, true);
+    }
+    if (request.method === 'POST' && path === '/names/reroll') return user ? account('reroll', {}, true) : needUser();
+    if (request.method === 'GET' && path === '/me') return user ? account('me') : needUser();
+    if (request.method === 'POST' && path === '/link/code') return user ? account('link-code') : needUser();
+    if (request.method === 'POST' && path === '/link/redeem') {
+      const { status, data } = await accounts(env, 'link-redeem', { code: body.code });
+      if (status !== 200) return json(data, status);
+      const { token } = await issueToken(env.TOKEN_SECRET, data.userId as string, data.name as string);
+      return json({ ...data, token });
+    }
+    if (path.startsWith('/friends')) {
+      if (!user) return needUser();
+      if (request.method === 'GET' && path === '/friends') return account('friends');
+      if (request.method === 'POST') {
+        if (path === '/friends/request') return account('friend-request', { name: body.name });
+        if (path === '/friends/respond') return account('friend-respond', { friendId: body.friendId, accept: body.accept });
+        if (path === '/friends/remove') return account('friend-remove', { friendId: body.friendId });
+        if (path === '/friends/block') return account('block', { friendId: body.friendId });
+        if (path === '/friends/dismiss') return account('challenge-dismiss', { roomCode: body.roomCode });
+        if (path === '/friends/challenge') {
+          const allowed = await accounts(env, 'can-challenge', { userId: user.userId, friendId: body.friendId });
+          if (allowed.status !== 200) return json(allowed.data, allowed.status);
+          const room = await createRoom(env, user.userId, (body.config as Partial<GameConfig>) ?? {}, false);
+          await accounts(env, 'challenge', { userId: user.userId, friendId: body.friendId, roomCode: room.code });
+          return json(room);
+        }
+      }
+    }
 
     if (path === '/rooms' && request.method === 'POST') {
       if (!user) return json({ error: 'Sign in first' }, 401);
-      const body = await request.json().catch(() => ({})) as { config?: Partial<GameConfig>; isPublic?: boolean };
-      const room = await createRoom(env, user.userId, body.config ?? {}, body.isPublic === true);
+      const room = await createRoom(env, user.userId, (body.config as Partial<GameConfig>) ?? {}, body.isPublic === true);
       return json(room);
     }
 

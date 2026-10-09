@@ -58,6 +58,7 @@ public class NeonMenu : MonoBehaviour
         BuildSetupScreen();
         BuildCustomizeScreen();
         BuildOnlineScreen();
+        BuildFriendsScreen();
         ShowMenu();
 
         // Coming back to the menu from an online game ends the session
@@ -85,6 +86,7 @@ public class NeonMenu : MonoBehaviour
     private void Update()
     {
         if (Screen.safeArea != lastSafeArea) ApplySafeArea();
+        PollFriendsIfNeeded();
     }
 
     // ───────────────────────── Canvas ─────────────────────────
@@ -641,6 +643,10 @@ public class NeonMenu : MonoBehaviour
         Button back = NeonButton(header, "<", new Vector2(48, 48), NeonTheme.Cyan, NeonTheme.Pink, 0f, 24, LeaveOnlineScreen);
         Place((RectTransform)back.transform, new Vector2(0, 0.5f), new Vector2(48, 48), new Vector2(28, 0));
 
+        friendsButton = NeonButton(header, "Friends", new Vector2(140, 44), NeonTheme.Yellow, NeonTheme.Pink, 0f, 17, ShowFriends);
+        Place((RectTransform)friendsButton.transform, new Vector2(1, 0.5f), new Vector2(140, 44), new Vector2(-70, 0));
+        friendsButtonLabel = friendsButton.GetComponentInChildren<TextMeshProUGUI>();
+
         TextMeshProUGUI title = NewText("Title", header, "PLAY ONLINE", 30, NeonTheme.Lime, TextAlignmentOptions.Left);
         NeonTheme.ApplyFont(title, display: true);
         title.rectTransform.anchorMin = new Vector2(0, 0);
@@ -652,12 +658,12 @@ public class NeonMenu : MonoBehaviour
         RectTransform right = Card(root, "Match Card", NeonTheme.Pink, new Vector2(0.5f, 0f), new Vector2(1f, 1f), new Vector2(8, 60), new Vector2(-24, -74));
 
         SectionLabel(left, "Your name", NeonTheme.Cyan);
-        // Names are generated (PlayerNames), never typed: nothing offensive can get in
+        // Names are generated and kept unique by the server, never typed: nothing offensive can get in
         RectTransform nameRow = Row(left);
         Image nameBox = NewImage("Name", nameRow, NeonTheme.Cyan);
         nameBox.sprite = NeonTheme.RoundedOutline;
         nameBox.type = Image.Type.Sliced;
-        nameLabel = NewText("Text", nameBox.transform, PlayerNames.Current, 18, NeonTheme.White, TextAlignmentOptions.Center);
+        nameLabel = NewText("Text", nameBox.transform, CurrentName(), 18, NeonTheme.White, TextAlignmentOptions.Center);
         Stretch(nameLabel.rectTransform);
         nameLabel.enableAutoSizing = true;
         nameLabel.fontSizeMin = 12;
@@ -798,9 +804,29 @@ public class NeonMenu : MonoBehaviour
         setupScreen.SetActive(false);
         customizeScreen.SetActive(false);
         onlineScreen.SetActive(true);
+        friendsScreen.SetActive(false);
         onlineStatus.text = "";
         SetSearching(null);
-        OnlineClient.GetOrCreate();
+        StartCoroutine(SignInAndShowName());
+    }
+
+    private string CurrentName()
+    {
+        string name = PlayerPrefs.GetString("OnlineName", "");
+        return string.IsNullOrEmpty(name) ? "…" : name;
+    }
+
+    private void ShowName()
+    {
+        string name = CurrentName();
+        if (nameLabel != null) nameLabel.text = name;
+        if (accountNote != null) RefreshAccountNote();
+    }
+
+    private IEnumerator SignInAndShowName()
+    {
+        yield return SignIn(_ => { });
+        ShowName();
     }
 
     private void LeaveOnlineScreen()
@@ -810,14 +836,34 @@ public class NeonMenu : MonoBehaviour
         ShowMenu();
     }
 
-    private void SetOnlineStatus(string text) => onlineStatus.text = text;
+    private void SetOnlineStatus(string text)
+    {
+        onlineStatus.text = text;
+        if (friendsStatus != null) friendsStatus.text = text;
+    }
 
-    private string ChosenName() => PlayerNames.Current;
+    private bool renaming;
 
     private void RerollName()
     {
-        if (onlineBusy) return; // keep the name stable while connecting or searching
-        nameLabel.text = PlayerNames.Reroll();
+        if (onlineBusy || renaming) return; // keep the name stable while connecting or searching
+        StartCoroutine(RerollRoutine());
+    }
+
+    private IEnumerator RerollRoutine()
+    {
+        renaming = true;
+        bool signedIn = false;
+        yield return SignIn(ok => signedIn = ok);
+        if (signedIn)
+        {
+            yield return OnlineClient.Instance.RerollName((name, error) =>
+            {
+                if (name != null) ShowName();
+                else SetOnlineStatus(error);
+            });
+        }
+        renaming = false;
     }
 
     private void CreateOnlineGame() => StartCoroutine(CreateRoutine());
@@ -828,7 +874,7 @@ public class NeonMenu : MonoBehaviour
     {
         var client = OnlineClient.GetOrCreate();
         bool ok = false;
-        yield return client.EnsureSignedIn(ChosenName(), (success, error) =>
+        yield return client.EnsureSignedIn((success, error) =>
         {
             ok = success;
             if (!success) SetOnlineStatus(error);
@@ -900,7 +946,7 @@ public class NeonMenu : MonoBehaviour
 
     private void OnOnlineClosed(string reason)
     {
-        if (onlineStarting || !onlineScreen.activeInHierarchy) return;
+        if (onlineStarting || !(onlineScreen.activeInHierarchy || friendsScreen.activeInHierarchy)) return;
         SetOnlineStatus("Couldn't join that game. Check the code, or it may already be full.");
         onlineBusy = false;
     }
@@ -922,6 +968,7 @@ public class NeonMenu : MonoBehaviour
     private void StartOnlineGame(NetState state)
     {
         onlineStarting = true;
+        if (cancelChallengeButton != null) cancelChallengeButton.gameObject.SetActive(false);
         var client = OnlineClient.Instance;
         client.OnMessage -= OnOnlineMessage;
         client.OnClosed -= OnOnlineClosed;
@@ -942,6 +989,408 @@ public class NeonMenu : MonoBehaviour
         SceneController.Instance.LoadGameScene(config);
     }
 
+    // ───────────────────────── Friends ─────────────────────────
+
+    private GameObject friendsScreen;
+    private Button friendsButton;
+    private TextMeshProUGUI friendsButtonLabel;
+    private TMP_InputField addFriendInput, linkCodeInput;
+    private TextMeshProUGUI accountNote, friendsStatus, appleButtonLabel;
+    private Button appleButton, cancelChallengeButton;
+    private RectTransform friendsList;
+    private FriendsResponse lastFriends;
+    private string lastFriendsJson = "";
+    private float nextFriendsPoll;
+    private bool pollingFriends;
+    private const float FriendsPollSeconds = 8f;
+
+    private void BuildFriendsScreen()
+    {
+        friendsScreen = NewRect("Friends Screen", safeRoot).gameObject;
+        RectTransform root = friendsScreen.GetComponent<RectTransform>();
+        Stretch(root);
+
+        RectTransform header = NewRect("Header", root);
+        header.anchorMin = new Vector2(0, 1);
+        header.anchorMax = new Vector2(1, 1);
+        header.pivot = new Vector2(0.5f, 1);
+        header.offsetMin = new Vector2(16, -64);
+        header.offsetMax = new Vector2(-24, -12);
+        Button back = NeonButton(header, "<", new Vector2(48, 48), NeonTheme.Cyan, NeonTheme.Pink, 0f, 24, ShowOnline);
+        Place((RectTransform)back.transform, new Vector2(0, 0.5f), new Vector2(48, 48), new Vector2(28, 0));
+        TextMeshProUGUI title = NewText("Title", header, "FRIENDS", 30, NeonTheme.Lime, TextAlignmentOptions.Left);
+        NeonTheme.ApplyFont(title, display: true);
+        title.rectTransform.anchorMin = new Vector2(0, 0);
+        title.rectTransform.anchorMax = new Vector2(1, 1);
+        title.rectTransform.offsetMin = new Vector2(70, 0);
+        title.rectTransform.offsetMax = new Vector2(-20, 0);
+
+        RectTransform left = Card(root, "Account Card", NeonTheme.Cyan, new Vector2(0f, 0f), new Vector2(0.46f, 1f), new Vector2(16, 60), new Vector2(-8, -74));
+        RectTransform right = Card(root, "Friends Card", NeonTheme.Pink, new Vector2(0.46f, 0f), new Vector2(1f, 1f), new Vector2(8, 60), new Vector2(-24, -74));
+
+        // Add a friend: names are generated, so this only ever matches real player names
+        SectionLabel(left, "Add a friend by their name", NeonTheme.Cyan);
+        RectTransform addRow = Row(left);
+        addRow.GetComponent<HorizontalLayoutGroup>().childForceExpandWidth = false;
+        addFriendInput = InputField(addRow, "e.g. NeonRook42", "", 24);
+        addFriendInput.characterValidation = TMP_InputField.CharacterValidation.Alphanumeric;
+        addFriendInput.GetComponent<LayoutElement>().flexibleWidth = 1;
+        Button add = NeonButton(addRow, "Add", new Vector2(0, 44), NeonTheme.Lime, NeonTheme.Pink, 0f, 17, () => StartCoroutine(AddFriendRoutine()));
+        Fixed(add, 76);
+
+        SectionLabel(left, "Your account", NeonTheme.Cyan);
+        accountNote = NewText("Account", left, "", 14, NeonTheme.Lavender, TextAlignmentOptions.TopLeft);
+        accountNote.fontStyle = FontStyles.Normal;
+        accountNote.enableWordWrapping = true;
+        accountNote.gameObject.AddComponent<LayoutElement>().preferredHeight = 38;
+        RectTransform appleRow = Row(left);
+        appleButton = NeonButton(appleRow, "Sign in with Apple", new Vector2(0, 44), NeonTheme.White, NeonTheme.Cyan, 0f, 16, SignInWithApple);
+        appleButtonLabel = appleButton.GetComponentInChildren<TextMeshProUGUI>();
+        RectTransform linkRow = Row(left);
+        linkRow.GetComponent<HorizontalLayoutGroup>().childForceExpandWidth = false;
+        Button getCode = NeonButton(linkRow, "My code", new Vector2(0, 44), NeonTheme.Yellow, NeonTheme.Cyan, 0f, 15, () => StartCoroutine(ShowLinkCodeRoutine()));
+        Fixed(getCode, 96);
+        linkCodeInput = InputField(linkRow, "CODE", "", 6);
+        linkCodeInput.characterValidation = TMP_InputField.CharacterValidation.Alphanumeric;
+        linkCodeInput.onValidateInput += (text, index, ch) => char.ToUpperInvariant(ch);
+        linkCodeInput.GetComponent<LayoutElement>().flexibleWidth = 1;
+        Button use = NeonButton(linkRow, "Use", new Vector2(0, 44), NeonTheme.Cyan, NeonTheme.Pink, 0f, 15, () => StartCoroutine(UseLinkCodeRoutine()));
+        Fixed(use, 64);
+
+        // Friends list (scrolls)
+        SectionLabel(right, "Friends", NeonTheme.PinkSoft);
+        RectTransform viewport = NewRect("Viewport", right);
+        var viewportSize = viewport.gameObject.AddComponent<LayoutElement>();
+        viewportSize.flexibleHeight = 1;
+        viewport.gameObject.AddComponent<RectMask2D>();
+        var viewportImage = viewport.gameObject.AddComponent<Image>();
+        viewportImage.color = new Color(0, 0, 0, 0); // catches drags for scrolling
+        friendsList = NewRect("List", viewport);
+        friendsList.anchorMin = new Vector2(0, 1);
+        friendsList.anchorMax = new Vector2(1, 1);
+        friendsList.pivot = new Vector2(0.5f, 1);
+        friendsList.offsetMin = friendsList.offsetMax = Vector2.zero;
+        var listLayout = friendsList.gameObject.AddComponent<VerticalLayoutGroup>();
+        listLayout.spacing = 6;
+        listLayout.childControlWidth = true;
+        listLayout.childControlHeight = true;
+        listLayout.childForceExpandWidth = true;
+        listLayout.childForceExpandHeight = false;
+        friendsList.gameObject.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        var scroll = viewport.gameObject.AddComponent<ScrollRect>();
+        scroll.content = friendsList;
+        scroll.viewport = viewport;
+        scroll.horizontal = false;
+        scroll.movementType = ScrollRect.MovementType.Clamped;
+
+        friendsStatus = NewText("Status", root, "", 16, NeonTheme.Yellow, TextAlignmentOptions.Center);
+        friendsStatus.enableWordWrapping = true;
+        friendsStatus.rectTransform.anchorMin = new Vector2(0, 0);
+        friendsStatus.rectTransform.anchorMax = new Vector2(1, 0);
+        friendsStatus.rectTransform.pivot = new Vector2(0.5f, 0);
+        friendsStatus.rectTransform.sizeDelta = new Vector2(-180, 48);
+        friendsStatus.rectTransform.anchoredPosition = new Vector2(-40, 6);
+        cancelChallengeButton = NeonButton(root, "Cancel", new Vector2(110, 38), NeonTheme.Cyan, NeonTheme.Pink, 0f, 15, CancelWaiting);
+        Place((RectTransform)cancelChallengeButton.transform, new Vector2(1, 0), new Vector2(110, 38), new Vector2(-80, 28));
+        cancelChallengeButton.gameObject.SetActive(false);
+
+        friendsScreen.SetActive(false);
+    }
+
+    private static void Fixed(Button button, float width)
+    {
+        var size = button.gameObject.GetComponent<LayoutElement>() ?? button.gameObject.AddComponent<LayoutElement>();
+        size.preferredWidth = width;
+        size.flexibleWidth = 0;
+    }
+
+    private void ShowFriends()
+    {
+        onlineScreen.SetActive(false);
+        friendsScreen.SetActive(true);
+        friendsStatus.text = onlineBusy ? friendsStatus.text : "";
+        RefreshAccountNote();
+        RebuildFriendsList();
+        nextFriendsPoll = 0f; // refresh right away
+    }
+
+    private void RefreshAccountNote()
+    {
+        if (accountNote == null) return;
+        bool apple = OnlineClient.Instance != null && OnlineClient.Instance.SignedInWithApple;
+        accountNote.text = apple
+            ? $"You're {CurrentName()}. Your name and friends are saved to your Apple ID."
+            : $"You're {CurrentName()}. Sign in with Apple to keep your name and friends if you reinstall.";
+        appleButtonLabel.text = apple ? "Signed in with Apple" : "Sign in with Apple";
+        appleButton.interactable = !apple;
+    }
+
+    // ── Polling: keeps the list fresh, marks you online, and surfaces challenges ──
+
+    private void PollFriendsIfNeeded()
+    {
+        if (friendsScreen == null || pollingFriends || onlineStarting) return;
+        if (!(onlineScreen.activeSelf || friendsScreen.activeSelf)) return;
+        if (Time.unscaledTime < nextFriendsPoll) return;
+        nextFriendsPoll = Time.unscaledTime + FriendsPollSeconds;
+        StartCoroutine(PollFriendsRoutine());
+    }
+
+    private IEnumerator PollFriendsRoutine()
+    {
+        pollingFriends = true;
+        var client = OnlineClient.GetOrCreate();
+        bool signedIn = false;
+        yield return client.EnsureSignedIn((ok, _) => signedIn = ok);
+        if (signedIn)
+        {
+            yield return client.GetFriends((result, error) =>
+            {
+                if (result == null) return;
+                lastFriends = result;
+                string json = JsonUtility.ToJson(result);
+                bool changed = json != lastFriendsJson;
+                lastFriendsJson = json;
+                UpdateFriendsBadge();
+                if (changed && friendsScreen.activeSelf) RebuildFriendsList();
+            });
+        }
+        pollingFriends = false;
+    }
+
+    private void UpdateFriendsBadge()
+    {
+        if (friendsButtonLabel == null || lastFriends == null) return;
+        int waiting = (lastFriends.challenges?.Length ?? 0);
+        if (lastFriends.friends != null) foreach (var f in lastFriends.friends) if (f.status == "incoming") waiting++;
+        friendsButtonLabel.text = waiting > 0 ? $"Friends ({waiting})" : "Friends";
+    }
+
+    private void RebuildFriendsList()
+    {
+        if (friendsList == null) return;
+        foreach (Transform child in friendsList) Destroy(child.gameObject);
+
+        if (lastFriends == null)
+        {
+            ListNote("Loading…");
+            return;
+        }
+        if (lastFriends.challenges != null)
+        {
+            foreach (var challenge in lastFriends.challenges)
+            {
+                var c = challenge;
+                RectTransform row = ListRow($"{c.fromName} challenged you!", NeonTheme.Lime, true);
+                RowButton(row, "Play", NeonTheme.Lime, () => StartCoroutine(AcceptChallengeRoutine(c)));
+                RowButton(row, "No thanks", NeonTheme.Cyan, () => StartCoroutine(Act(OnlineClient.Instance.DismissChallenge(c.roomCode, ActDone))));
+            }
+        }
+        var friends = lastFriends.friends ?? new FriendInfo[0];
+        if (friends.Length == 0 && (lastFriends.challenges == null || lastFriends.challenges.Length == 0))
+        {
+            ListNote("No friends yet. Share your name and add theirs on the left.");
+            return;
+        }
+        // Requests to you first, then friends (online first), then requests you sent
+        foreach (var friend in friends) if (friend.status == "incoming") IncomingRow(friend);
+        foreach (var friend in friends) if (friend.status == "friends" && friend.online) FriendRow(friend);
+        foreach (var friend in friends) if (friend.status == "friends" && !friend.online) FriendRow(friend);
+        foreach (var friend in friends) if (friend.status == "outgoing") OutgoingRow(friend);
+    }
+
+    private void IncomingRow(FriendInfo f)
+    {
+        RectTransform row = ListRow($"{f.name} added you", NeonTheme.Yellow, true);
+        RowButton(row, "Accept", NeonTheme.Lime, () => StartCoroutine(Act(OnlineClient.Instance.RespondToFriend(f.userId, true, ActDone))));
+        RowButton(row, "Decline", NeonTheme.Cyan, () => StartCoroutine(Act(OnlineClient.Instance.RespondToFriend(f.userId, false, ActDone))));
+        RowButton(row, "Block", NeonTheme.Pink, () => StartCoroutine(Act(OnlineClient.Instance.BlockPlayer(f.userId, ActDone))));
+    }
+
+    private void FriendRow(FriendInfo f)
+    {
+        RectTransform row = ListRow(f.name, f.online ? NeonTheme.Lime : NeonTheme.Muted, f.online);
+        RowButton(row, "Challenge", NeonTheme.Lime, () => StartCoroutine(ChallengeRoutine(f)));
+        RowButton(row, "Remove", NeonTheme.Cyan, () => StartCoroutine(Act(OnlineClient.Instance.RemoveFriend(f.userId, ActDone))));
+        RowButton(row, "Block", NeonTheme.Pink, () => StartCoroutine(Act(OnlineClient.Instance.BlockPlayer(f.userId, ActDone))));
+    }
+
+    private void OutgoingRow(FriendInfo f)
+    {
+        RectTransform row = ListRow($"{f.name} (request sent)", NeonTheme.Muted, false);
+        RowButton(row, "Cancel", NeonTheme.Cyan, () => StartCoroutine(Act(OnlineClient.Instance.RemoveFriend(f.userId, ActDone))));
+    }
+
+    private RectTransform ListRow(string text, Color dotColor, bool bright)
+    {
+        RectTransform row = NewRect("Row", friendsList);
+        var size = row.gameObject.AddComponent<LayoutElement>();
+        size.preferredHeight = 40;
+        var layout = row.gameObject.AddComponent<HorizontalLayoutGroup>();
+        layout.spacing = 6;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = true;
+        layout.childAlignment = TextAnchor.MiddleLeft;
+
+        Image dot = NewImage("Online", row, dotColor);
+        dot.sprite = NeonTheme.Circle;
+        dot.preserveAspect = true;
+        var dotSize = dot.gameObject.AddComponent<LayoutElement>();
+        dotSize.preferredWidth = 12;
+        dotSize.flexibleWidth = 0;
+
+        TextMeshProUGUI label = NewText("Name", row, text, 16, bright ? NeonTheme.White : NeonTheme.Lavender, TextAlignmentOptions.Left);
+        label.enableAutoSizing = true;
+        label.fontSizeMin = 11;
+        label.fontSizeMax = 16;
+        label.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1;
+        return row;
+    }
+
+    private void RowButton(RectTransform row, string text, Color color, System.Action onClick)
+    {
+        Button b = NeonButton(row, text, new Vector2(0, 36), color, NeonTheme.Ground, 0f, 13, onClick);
+        Fixed(b, text.Length > 7 ? 92 : 74);
+    }
+
+    private void ListNote(string text)
+    {
+        TextMeshProUGUI note = NewText("Note", friendsList, text, 15, NeonTheme.Lavender, TextAlignmentOptions.TopLeft);
+        note.fontStyle = FontStyles.Normal;
+        note.enableWordWrapping = true;
+        note.gameObject.AddComponent<LayoutElement>().preferredHeight = 48;
+    }
+
+    // ── Actions ──
+
+    private string actError;
+    private void ActDone(string error) => actError = error;
+
+    /// <summary>Run a friends call, show any error, then refresh the list</summary>
+    private IEnumerator Act(IEnumerator call)
+    {
+        actError = null;
+        yield return call;
+        if (actError != null) friendsStatus.text = actError;
+        nextFriendsPoll = 0f;
+    }
+
+    private IEnumerator AddFriendRoutine()
+    {
+        string name = addFriendInput.text.Trim();
+        if (name.Length == 0) { friendsStatus.text = "Type your friend's player name, like NeonRook42"; yield break; }
+        bool signedIn = false;
+        yield return SignIn(ok => signedIn = ok);
+        if (!signedIn) yield break;
+        yield return OnlineClient.Instance.SendFriendRequest(name, (status, error) =>
+        {
+            if (error != null) { friendsStatus.text = error; return; }
+            addFriendInput.text = "";
+            friendsStatus.text = status == "friends" ? $"You and {name} are now friends!" : $"Friend request sent to {name}";
+        });
+        nextFriendsPoll = 0f;
+    }
+
+    private IEnumerator ChallengeRoutine(FriendInfo friend)
+    {
+        if (onlineBusy) yield break;
+        onlineBusy = true;
+        friendsStatus.text = $"Challenging {friend.name}…";
+        string code = null;
+        yield return OnlineClient.Instance.ChallengeFriend(friend.userId, "4x4x4", (c, error) =>
+        {
+            code = c;
+            if (c == null) friendsStatus.text = error;
+        });
+        if (code == null) { onlineBusy = false; yield break; }
+        ListenForStart();
+        OnlineClient.Instance.JoinRoom(code);
+        friendsStatus.text = $"Waiting for {friend.name} to accept…";
+        cancelChallengeButton.gameObject.SetActive(true);
+    }
+
+    private IEnumerator AcceptChallengeRoutine(ChallengeInfo challenge)
+    {
+        if (onlineBusy) yield break;
+        onlineBusy = true;
+        friendsStatus.text = $"Joining {challenge.fromName}'s game…";
+        yield return OnlineClient.Instance.DismissChallenge(challenge.roomCode, _ => { });
+        ListenForStart();
+        OnlineClient.Instance.JoinRoom(challenge.roomCode);
+    }
+
+    private void CancelWaiting()
+    {
+        if (OnlineClient.Instance != null) OnlineClient.Instance.LeaveOnline();
+        onlineBusy = false;
+        cancelChallengeButton.gameObject.SetActive(false);
+        friendsStatus.text = "";
+    }
+
+    private void SignInWithApple()
+    {
+        friendsStatus.text = "";
+        AppleSignIn.Start((token, error) =>
+        {
+            if (token == null)
+            {
+                if (error != "cancelled") friendsStatus.text = error;
+                return;
+            }
+            StartCoroutine(LinkAppleRoutine(token));
+        });
+    }
+
+    private IEnumerator LinkAppleRoutine(string identityToken)
+    {
+        bool signedIn = false;
+        yield return SignIn(ok => signedIn = ok);
+        if (!signedIn) yield break;
+        yield return OnlineClient.Instance.LinkApple(identityToken, (restored, error) =>
+        {
+            if (error != null) { friendsStatus.text = error; return; }
+            friendsStatus.text = restored ? $"Welcome back, {CurrentName()}!" : "Signed in with Apple. Your name and friends are saved.";
+        });
+        ResetFriendsCache();
+    }
+
+    private IEnumerator ShowLinkCodeRoutine()
+    {
+        bool signedIn = false;
+        yield return SignIn(ok => signedIn = ok);
+        if (!signedIn) yield break;
+        yield return OnlineClient.Instance.CreateLinkCode((code, error) =>
+        {
+            friendsStatus.text = code != null
+                ? $"Your code is {code}. Type it on your other device within 10 minutes to play there as {CurrentName()}."
+                : error;
+        });
+    }
+
+    private IEnumerator UseLinkCodeRoutine()
+    {
+        string code = linkCodeInput.text.Trim();
+        if (code.Length != 6) { friendsStatus.text = "Link codes are 6 letters and numbers"; yield break; }
+        yield return OnlineClient.GetOrCreate().RedeemLinkCode(code, error =>
+        {
+            if (error != null) { friendsStatus.text = error; return; }
+            linkCodeInput.text = "";
+            friendsStatus.text = $"Linked! You're {CurrentName()} on this device now.";
+        });
+        ResetFriendsCache();
+    }
+
+    private void ResetFriendsCache()
+    {
+        lastFriends = null;
+        lastFriendsJson = "";
+        ShowName();
+        RebuildFriendsList();
+        nextFriendsPoll = 0f;
+    }
+
     // ───────────────────────── Navigation ─────────────────────────
 
     private void ShowMenu()
@@ -950,6 +1399,7 @@ public class NeonMenu : MonoBehaviour
         setupScreen.SetActive(false);
         customizeScreen.SetActive(false);
         onlineScreen.SetActive(false);
+        friendsScreen.SetActive(false);
     }
 
     private void ShowCustomize()
@@ -957,6 +1407,7 @@ public class NeonMenu : MonoBehaviour
         menuScreen.SetActive(false);
         setupScreen.SetActive(false);
         onlineScreen.SetActive(false);
+        friendsScreen.SetActive(false);
         customizeScreen.SetActive(true);
         Refresh();
     }
@@ -966,14 +1417,17 @@ public class NeonMenu : MonoBehaviour
         menuScreen.SetActive(false);
         customizeScreen.SetActive(false);
         onlineScreen.SetActive(false);
+        friendsScreen.SetActive(false);
         setupScreen.SetActive(true);
         Refresh();
     }
 
+    private Coroutine toastRoutine;
+
     private void ShowToast(string message)
     {
-        StopAllCoroutines();
-        StartCoroutine(ToastRoutine(message));
+        if (toastRoutine != null) StopCoroutine(toastRoutine);
+        toastRoutine = StartCoroutine(ToastRoutine(message));
     }
 
     private IEnumerator ToastRoutine(string message)
